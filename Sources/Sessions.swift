@@ -25,6 +25,7 @@ struct ClaudeSession: Hashable {
     let commandArgs: String
     let smoothedCpu: Double
     let state: SessionState
+    let cwdPath: String?
     let folderName: String?
 
     var displayName: String {
@@ -109,15 +110,26 @@ enum ClaudeNamer {
 // MARK: - Session Detector
 
 class SessionDetector {
+    private struct ProcessSnapshot {
+        let pid: Int32
+        let ppid: Int32
+        let tty: String
+        let cpu: Double
+        let command: String
+        let binaryName: String
+    }
+
     private var cpuHistory: [Int32: [Double]] = [:]
     private var wasWorking: Set<Int32> = []
     private var workingTickCount: [Int32: Int] = [:]
+    private var postWorkIdleTicks: [Int32: Int] = [:]
+    private let doneDisplayTicks = 2
 
     func detectSessions() -> [ClaudeSession] {
         let pipe = Pipe()
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: "/bin/ps")
-        proc.arguments = ["-eo", "pid,tty,%cpu,command"]
+        proc.arguments = ["-eo", "pid,ppid,tty,%cpu,command"]
         proc.standardOutput = pipe
         proc.standardError = FileHandle.nullDevice
         do { try proc.run() } catch { return [] }
@@ -125,69 +137,80 @@ class SessionDetector {
         proc.waitUntilExit()
         guard let output = String(data: data, encoding: .utf8) else { return [] }
 
+        let processes = parseProcessSnapshots(from: output)
+        let byParent = Dictionary(grouping: processes, by: \.ppid)
+
         var sessions: [ClaudeSession] = []
         var seen = Set<Int32>()
 
-        for line in output.components(separatedBy: "\n") {
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-            let parts = trimmed.split(separator: " ", maxSplits: 3, omittingEmptySubsequences: true)
-            guard parts.count >= 4 else { continue }
-            guard let pid = Int32(parts[0]) else { continue }
+        for process in processes {
+            let pid = process.pid
             guard !seen.contains(pid) else { continue }
 
-            let cmd = String(parts[3])
-            let binary = cmd.split(separator: " ", maxSplits: 1).first.map(String.init) ?? ""
-            let binaryName = (binary as NSString).lastPathComponent
-
             let tool: SessionTool
-            if binaryName == "claude" { tool = .claude }
-            else if binaryName == "codex" { tool = .codex }
+            if process.binaryName == "claude" { tool = .claude }
+            else if process.binaryName == "codex" { tool = .codex }
             else { continue }
 
-            if cmd.contains("ClaudeMonitor") { continue }
+            if process.command.contains("ClaudeMonitor") { continue }
 
-            let tty = String(parts[1])
+            let tty = process.tty
             guard tty != "??" else { continue }
 
             // -p/--print filter is Claude-specific (subagent mode)
             if tool == .claude {
-                let isPiped = cmd.contains(" -p ") || cmd.contains(" --print")
+                let isPiped = process.command.contains(" -p ") || process.command.contains(" --print")
                 guard !isPiped else { continue }
             }
 
             seen.insert(pid)
 
-            let cpu = Double(parts[2]) ?? 0.0
+            // Codex often does heavy work in descendants; Claude activity is better
+            // represented by the top-level CLI process to reduce false positives.
+            let descendantCpu = (tool == .codex) ? descendantCPU(for: pid, byParent: byParent) : 0.0
+            let effectiveCpu = process.cpu + descendantCpu
             var hist = cpuHistory[pid] ?? []
-            hist.append(cpu)
+            hist.append(effectiveCpu)
             if hist.count > 3 { hist.removeFirst() }
             cpuHistory[pid] = hist
             let smoothed = hist.reduce(0, +) / Double(hist.count)
 
-            let cpuHigh = smoothed > 5.0
+            let cpuThreshold = (tool == .codex) ? 1.25 : 8.0
+            let requiredTicks = (tool == .codex) ? 1 : 2
+            let cpuHigh = smoothed > cpuThreshold
             if cpuHigh {
                 workingTickCount[pid] = (workingTickCount[pid] ?? 0) + 1
             } else {
                 workingTickCount[pid] = 0
             }
-            let isWorking = (workingTickCount[pid] ?? 0) >= 2
+            let isWorking = (workingTickCount[pid] ?? 0) >= requiredTicks
 
             let state: SessionState
             if isWorking {
                 wasWorking.insert(pid)
+                postWorkIdleTicks[pid] = 0
                 state = .working
             } else if wasWorking.contains(pid) {
-                state = .done
+                let idleTicks = (postWorkIdleTicks[pid] ?? 0) + 1
+                postWorkIdleTicks[pid] = idleTicks
+                if idleTicks <= doneDisplayTicks {
+                    state = .done
+                } else {
+                    wasWorking.remove(pid)
+                    postWorkIdleTicks[pid] = 0
+                    state = .idle
+                }
             } else {
                 state = .idle
             }
 
-            let folder = SessionDetector.folderName(forPid: pid)
+            let cwdPath = SessionDetector.cwdPath(forPid: pid)
+            let folder = cwdPath.map { ($0 as NSString).lastPathComponent }
 
             sessions.append(ClaudeSession(
                 pid: pid, tty: tty, tool: tool, isInteractive: true,
-                commandArgs: cmd, smoothedCpu: smoothed, state: state,
-                folderName: folder
+                commandArgs: process.command, smoothedCpu: smoothed, state: state,
+                cwdPath: cwdPath, folderName: folder
             ))
         }
 
@@ -195,6 +218,7 @@ class SessionDetector {
         cpuHistory = cpuHistory.filter { alive.contains($0.key) }
         wasWorking = wasWorking.filter { alive.contains($0) }
         workingTickCount = workingTickCount.filter { alive.contains($0.key) }
+        postWorkIdleTicks = postWorkIdleTicks.filter { alive.contains($0.key) }
 
         let activeTTYs = Set(sessions.map { $0.tty })
         ClaudeNamer.prune(activeTTYs: activeTTYs)
@@ -203,11 +227,56 @@ class SessionDetector {
         return sessions
     }
 
-    func clearDone(pid: Int32) {
-        wasWorking.remove(pid)
+    private func parseProcessSnapshots(from output: String) -> [ProcessSnapshot] {
+        var snapshots: [ProcessSnapshot] = []
+        for line in output.components(separatedBy: "\n") {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            let parts = trimmed.split(separator: " ", maxSplits: 4, omittingEmptySubsequences: true)
+            guard parts.count >= 5,
+                  let pid = Int32(parts[0]),
+                  let ppid = Int32(parts[1]) else { continue }
+
+            let tty = String(parts[2])
+            let cpu = Double(parts[3]) ?? 0.0
+            let command = String(parts[4])
+            let binary = command.split(separator: " ", maxSplits: 1).first.map(String.init) ?? ""
+            let binaryName = (binary as NSString).lastPathComponent
+            snapshots.append(ProcessSnapshot(
+                pid: pid,
+                ppid: ppid,
+                tty: tty,
+                cpu: cpu,
+                command: command,
+                binaryName: binaryName
+            ))
+        }
+        return snapshots
     }
 
-    static func folderName(forPid pid: Int32) -> String? {
+    private func descendantCPU(for pid: Int32, byParent: [Int32: [ProcessSnapshot]]) -> Double {
+        var totalCPU = 0.0
+        var stack: [Int32] = [pid]
+        var visited: Set<Int32> = [pid]
+
+        while let current = stack.popLast() {
+            guard let children = byParent[current] else { continue }
+            for child in children {
+                guard !visited.contains(child.pid) else { continue }
+                visited.insert(child.pid)
+                totalCPU += child.cpu
+                stack.append(child.pid)
+            }
+        }
+
+        return totalCPU
+    }
+
+    func clearDone(pid: Int32) {
+        wasWorking.remove(pid)
+        postWorkIdleTicks.removeValue(forKey: pid)
+    }
+
+    static func cwdPath(forPid pid: Int32) -> String? {
         let pipe = Pipe()
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: "/usr/sbin/lsof")
@@ -220,7 +289,7 @@ class SessionDetector {
         guard let output = String(data: data, encoding: .utf8) else { return nil }
         for line in output.components(separatedBy: "\n") {
             if line.hasPrefix("n/") {
-                return (String(line.dropFirst()) as NSString).lastPathComponent
+                return String(line.dropFirst())
             }
         }
         return nil

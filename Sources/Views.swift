@@ -1,5 +1,12 @@
 import AppKit
 
+func safeMonospacedFont(ofSize size: CGFloat, weight: NSFont.Weight) -> NSFont {
+    if let font = NSFont.monospacedSystemFont(ofSize: size, weight: weight) as NSFont? {
+        return font
+    }
+    return NSFont.systemFont(ofSize: size, weight: weight)
+}
+
 // MARK: - Session View
 
 class ClaudeSessionView: NSView {
@@ -67,11 +74,11 @@ class ClaudeSessionView: NSView {
             ? NSColor(red: 0.85, green: 0.45, blue: 0.22, alpha: 0.7)
             : NSColor(red: 0.4, green: 0.7, blue: 0.9, alpha: 0.7)
         let nameAttrs: [NSAttributedString.Key: Any] = [
-            .font: NSFont.monospacedSystemFont(ofSize: 12, weight: .bold),
+            .font: safeMonospacedFont(ofSize: 12, weight: .bold),
             .foregroundColor: color
         ]
         let badgeAttrs: [NSAttributedString.Key: Any] = [
-            .font: NSFont.monospacedSystemFont(ofSize: 9, weight: .medium),
+            .font: safeMonospacedFont(ofSize: 9, weight: .medium),
             .foregroundColor: badgeColor
         ]
         let label = NSMutableAttributedString(string: name, attributes: nameAttrs)
@@ -83,7 +90,7 @@ class ClaudeSessionView: NSView {
         // Folder subtitle
         if let folder = session.truncatedFolder {
             let folderAttrs: [NSAttributedString.Key: Any] = [
-                .font: NSFont.monospacedSystemFont(ofSize: 10, weight: .regular),
+                .font: safeMonospacedFont(ofSize: 10, weight: .regular),
                 .foregroundColor: NSColor(white: 0.55, alpha: 0.9)
             ]
             let folderStr = NSAttributedString(string: folder, attributes: folderAttrs)

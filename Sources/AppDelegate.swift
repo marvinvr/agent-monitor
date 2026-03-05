@@ -26,7 +26,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         panel.contentView = content
 
         titleLabel = NSTextField(labelWithString: "Claude Monitor")
-        titleLabel.font = NSFont.monospacedSystemFont(ofSize: 12, weight: .bold)
+        titleLabel.font = safeMonospacedFont(ofSize: 12, weight: .bold)
         titleLabel.textColor = NSColor(red: 0.85, green: 0.45, blue: 0.22, alpha: 1.0)
         content.addSubview(titleLabel)
 
@@ -126,7 +126,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         if count == 0 {
             let lbl = NSTextField(labelWithString: "No active sessions")
-            lbl.font = NSFont.monospacedSystemFont(ofSize: 10, weight: .regular)
+            lbl.font = safeMonospacedFont(ofSize: 10, weight: .regular)
             lbl.textColor = NSColor(white: 0.4, alpha: 1.0)
             lbl.sizeToFit()
             lbl.frame.origin = NSPoint(x: (winW - lbl.frame.width) / 2, y: winH / 2 - 10)
