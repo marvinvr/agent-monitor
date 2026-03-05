@@ -83,8 +83,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             let newSessions = self.detector.detectSessions()
             DispatchQueue.main.async {
                 defer { self.isPolling = false }
-                let oldFP = self.sessions.map { "\($0.pid):\($0.state)" }.joined()
-                let newFP = newSessions.map { "\($0.pid):\($0.state)" }.joined()
+                let oldFP = self.sessions.map { "\($0.pid):\($0.state):\($0.tool)" }.joined()
+                let newFP = newSessions.map { "\($0.pid):\($0.state):\($0.tool)" }.joined()
                 self.sessions = newSessions
                 if oldFP != newFP { self.rebuildViews() }
             }
@@ -115,7 +115,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         panel.setFrame(NSRect(x: old.maxX - winW, y: old.maxY - winH, width: winW, height: winH),
                        display: true, animate: true)
 
-        titleLabel.stringValue = count <= 1 ? "Claude" : "Claude Monitor"
+        let tools = Set(sessions.map { $0.tool })
+        if tools.count == 1, let only = tools.first {
+            titleLabel.stringValue = count <= 1 ? only.rawValue.capitalized : "\(only.rawValue.capitalized) Monitor"
+        } else {
+            titleLabel.stringValue = count <= 1 ? "Agents" : "Agent Monitor"
+        }
         titleLabel.sizeToFit()
         titleLabel.frame.origin = NSPoint(x: (winW - titleLabel.frame.width) / 2, y: winH - titleH - 2)
 

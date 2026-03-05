@@ -1,6 +1,6 @@
 # Claude Monitor
 
-macOS floating always-on-top window that shows active Claude Code CLI sessions as pixel art Claude sparkles.
+macOS floating always-on-top window that shows active Claude Code and Codex CLI sessions as pixel art sprites.
 
 ## Tech Stack
 - **Swift / AppKit** — native macOS app, no frameworks
@@ -24,10 +24,11 @@ cp Info.plist "/Applications/Claude Monitor.app/Contents/Info.plist"
 NEVER start/launch/open the app. The user will do it themselves.
 
 ## How It Works
-- Polls `ps -eo pid,tty,%cpu,command` every 2s on a background queue to find `claude` processes
-- Only shows interactive sessions (real TTY, not `??`, not `-p` subagents)
+- Polls `ps -eo pid,tty,%cpu,command` every 2s on a background queue to find `claude` and `codex` processes
+- Only shows interactive sessions (real TTY, not `??`, not `-p` subagents for Claude)
 - CPU smoothed over 3 samples with hysteresis (2+ ticks >5% CPU) to avoid false "working" triggers
 - Three states: **idle** (waiting), **working** (active CPU), **done** (was working, now needs input — hand raised)
+- Each session carries a `SessionTool` (.claude or .codex) with a badge (`·C` or `·X`) next to the name
 
 ## Sprites
 - Claude sparkle shape (4-pointed star like the CLI banner `▐▛███▜▌`), not a human

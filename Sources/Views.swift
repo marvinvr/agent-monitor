@@ -55,7 +55,7 @@ class ClaudeSessionView: NSView {
         img.draw(in: NSRect(x: x, y: y, width: img.size.width, height: img.size.height),
                  from: .zero, operation: .sourceOver, fraction: 1.0)
 
-        // Name label
+        // Name label with tool badge
         let name = session.displayName
         let color: NSColor
         switch session.state {
@@ -63,14 +63,22 @@ class ClaudeSessionView: NSView {
         case .done: color = NSColor(red: 0.3, green: 0.85, blue: 1.0, alpha: 1.0)
         case .idle: color = NSColor(white: 0.6, alpha: 0.9)
         }
-        let attrs: [NSAttributedString.Key: Any] = [
+        let badgeColor: NSColor = session.tool == .claude
+            ? NSColor(red: 0.85, green: 0.45, blue: 0.22, alpha: 0.7)
+            : NSColor(red: 0.4, green: 0.7, blue: 0.9, alpha: 0.7)
+        let nameAttrs: [NSAttributedString.Key: Any] = [
             .font: NSFont.monospacedSystemFont(ofSize: 12, weight: .bold),
             .foregroundColor: color
         ]
-        let str = NSAttributedString(string: name, attributes: attrs)
-        let sz = str.size()
+        let badgeAttrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.monospacedSystemFont(ofSize: 9, weight: .medium),
+            .foregroundColor: badgeColor
+        ]
+        let label = NSMutableAttributedString(string: name, attributes: nameAttrs)
+        label.append(NSAttributedString(string: "·\(session.toolBadge)", attributes: badgeAttrs))
+        let sz = label.size()
         let nameY: CGFloat = session.truncatedFolder != nil ? 16 : 2
-        str.draw(at: NSPoint(x: (bounds.width - sz.width) / 2, y: nameY))
+        label.draw(at: NSPoint(x: (bounds.width - sz.width) / 2, y: nameY))
 
         // Folder subtitle
         if let folder = session.truncatedFolder {

@@ -1,5 +1,12 @@
 import Foundation
 
+// MARK: - Session Tool
+
+enum SessionTool: String {
+    case claude
+    case codex
+}
+
 // MARK: - Session State
 
 enum SessionState {
@@ -13,6 +20,7 @@ enum SessionState {
 struct ClaudeSession: Hashable {
     let pid: Int32
     let tty: String
+    let tool: SessionTool
     let isInteractive: Bool
     let commandArgs: String
     let smoothedCpu: Double
@@ -22,6 +30,13 @@ struct ClaudeSession: Hashable {
     var displayName: String {
         guard isInteractive else { return "sub" }
         return ClaudeNamer.name(for: tty)
+    }
+
+    var toolBadge: String {
+        switch tool {
+        case .claude: return "C"
+        case .codex: return "X"
+        }
     }
 
     var truncatedFolder: String? {
@@ -38,8 +53,9 @@ struct ClaudeSession: Hashable {
         }
         let cpu = String(format: "%.1f%%", smoothedCpu)
         let name = displayName
+        let toolName = tool.rawValue.capitalized
         let folder = folderName.map { " in \($0)" } ?? ""
-        return "\(name) - \(stateStr) (\(cpu) CPU)\(folder)\nPID: \(pid) [\(tty)]"
+        return "\(name) [\(toolName)] - \(stateStr) (\(cpu) CPU)\(folder)\nPID: \(pid) [\(tty)]"
     }
 
     func hash(into hasher: inout Hasher) { hasher.combine(pid) }
@@ -122,14 +138,22 @@ class SessionDetector {
             let cmd = String(parts[3])
             let binary = cmd.split(separator: " ", maxSplits: 1).first.map(String.init) ?? ""
             let binaryName = (binary as NSString).lastPathComponent
-            guard binaryName == "claude" else { continue }
+
+            let tool: SessionTool
+            if binaryName == "claude" { tool = .claude }
+            else if binaryName == "codex" { tool = .codex }
+            else { continue }
+
             if cmd.contains("ClaudeMonitor") { continue }
 
             let tty = String(parts[1])
             guard tty != "??" else { continue }
 
-            let isPiped = cmd.contains(" -p ") || cmd.contains(" --print")
-            guard !isPiped else { continue }
+            // -p/--print filter is Claude-specific (subagent mode)
+            if tool == .claude {
+                let isPiped = cmd.contains(" -p ") || cmd.contains(" --print")
+                guard !isPiped else { continue }
+            }
 
             seen.insert(pid)
 
@@ -161,7 +185,7 @@ class SessionDetector {
             let folder = SessionDetector.folderName(forPid: pid)
 
             sessions.append(ClaudeSession(
-                pid: pid, tty: tty, isInteractive: true,
+                pid: pid, tty: tty, tool: tool, isInteractive: true,
                 commandArgs: cmd, smoothedCpu: smoothed, state: state,
                 folderName: folder
             ))
