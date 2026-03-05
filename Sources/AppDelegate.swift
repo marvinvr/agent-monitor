@@ -10,9 +10,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var titleLabel: NSTextField!
     var statusItem: NSStatusItem?
     var sprites: SpriteCache!
+    private let pollQueue = DispatchQueue(label: "com.mvr.claude-monitor.poll", qos: .utility)
+    private var isPolling = false
+    private let stayAliveReason = "Claude Monitor should remain running in the background"
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
+        ProcessInfo.processInfo.disableAutomaticTermination(stayAliveReason)
+        ProcessInfo.processInfo.disableSuddenTermination()
         sprites = SpriteCache.create()
 
         panel = MonitorPanel()
@@ -36,6 +41,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             self?.animate()
         }
         pollSessions()
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        ProcessInfo.processInfo.enableAutomaticTermination(stayAliveReason)
+        ProcessInfo.processInfo.enableSuddenTermination()
     }
 
     func setupMenuBar() {
@@ -67,10 +77,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     @objc func showPanel() { panel.orderFront(nil) }
 
     func pollSessions() {
-        DispatchQueue.global(qos: .utility).async { [weak self] in
-            guard let self = self else { return }
+        guard !isPolling else { return }
+        isPolling = true
+        pollQueue.async {
             let newSessions = self.detector.detectSessions()
             DispatchQueue.main.async {
+                defer { self.isPolling = false }
                 let oldFP = self.sessions.map { "\($0.pid):\($0.state)" }.joined()
                 let newFP = newSessions.map { "\($0.pid):\($0.state)" }.joined()
                 self.sessions = newSessions
@@ -103,7 +115,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         panel.setFrame(NSRect(x: old.maxX - winW, y: old.maxY - winH, width: winW, height: winH),
                        display: true, animate: true)
 
-        titleLabel.stringValue = "Claude Monitor"
+        titleLabel.stringValue = count <= 1 ? "Claude" : "Claude Monitor"
         titleLabel.sizeToFit()
         titleLabel.frame.origin = NSPoint(x: (winW - titleLabel.frame.width) / 2, y: winH - titleH - 2)
 

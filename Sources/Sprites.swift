@@ -4,23 +4,13 @@ import AppKit
 
 struct Clr {
     let r: CGFloat, g: CGFloat, b: CGFloat, a: CGFloat
-    static let O = Clr(r: 0.15, g: 0.11, b: 0.20, a: 1)    // outline
-    static let C = Clr(r: 0.85, g: 0.45, b: 0.22, a: 1)    // primary orange
-    static let c = Clr(r: 0.72, g: 0.36, b: 0.16, a: 1)    // shadow orange
-    static let L = Clr(r: 0.95, g: 0.60, b: 0.30, a: 1)    // highlight orange
-    static let E = Clr(r: 0.12, g: 0.10, b: 0.18, a: 1)    // eyes
-    static let W = Clr(r: 0.98, g: 0.96, b: 0.92, a: 1)    // bright highlight
-    static let X = Clr(r: 1.00, g: 0.88, b: 0.35, a: 1)    // spark
-    static let G = Clr(r: 0.35, g: 0.82, b: 0.55, a: 1)    // screen green
-    static let g = Clr(r: 0.22, g: 0.55, b: 0.35, a: 1)    // screen dark
-    static let K = Clr(r: 0.45, g: 0.35, b: 0.25, a: 1)    // desk
-    static let k = Clr(r: 0.35, g: 0.25, b: 0.18, a: 1)    // desk shadow
-    static let B = Clr(r: 0.30, g: 0.28, b: 0.34, a: 1)    // keyboard
-    static let D = Clr(r: 0.40, g: 0.80, b: 0.45, a: 1)    // done glow
-    static let A = Clr(r: 0.29, g: 0.79, b: 0.92, a: 1)    // accent cyan
-    static let a = Clr(r: 0.17, g: 0.45, b: 0.56, a: 1)    // accent cyan shadow
-    static let M = Clr(r: 0.72, g: 0.74, b: 0.78, a: 1)    // metal highlight
-    static let m = Clr(r: 0.52, g: 0.54, b: 0.58, a: 1)    // metal shadow
+    static let O = Clr(r: 0.09, g: 0.10, b: 0.12, a: 1)    // dark outline
+    static let W = Clr(r: 0.96, g: 0.97, b: 0.99, a: 1)    // body white
+    static let S = Clr(r: 0.80, g: 0.84, b: 0.89, a: 1)    // lower shadow
+    static let E = Clr(r: 0.12, g: 0.13, b: 0.16, a: 1)    // face details
+    static let T = Clr(r: 0.47, g: 0.89, b: 0.66, a: 1)    // activity accent
+    static let t = Clr(r: 0.24, g: 0.56, b: 0.42, a: 1)    // activity shadow
+    static let X = Clr(r: 0.99, g: 0.88, b: 0.42, a: 1)    // done spark
 }
 
 // MARK: - Sprite Parsing
@@ -28,9 +18,7 @@ struct Clr {
 typealias P = Clr?
 
 private let spritePalette: [Character: P] = [
-    ".": nil, "O": .O, "F": .C, "f": .c, "L": .L, "E": .E, "W": .W, "X": .X,
-    "G": .G, "g": .g, "K": .K, "k": .k, "B": .B, "D": .D, "A": .A, "a": .a,
-    "M": .M, "m": .m,
+    ".": nil, "O": .O, "W": .W, "S": .S, "E": .E, "T": .T, "t": .t, "X": .X,
 ]
 
 func sprite(_ rows: [String]) -> [[P]] {
@@ -48,58 +36,58 @@ func sprite(_ rows: [String]) -> [[P]] {
 
 let idleFrame1: [[P]] = sprite([
     "................",
-    ".......AA.......",
-    "......AaaA......",
-    ".....OOFFOO.....",
-    "....OFFLLFFO....",
-    "...OFFLWWLFFO...",
-    "...OFFAEEAFFO...",
-    "...OFFAEEAFFO...",
-    "...OFFFFfffFO...",
-    "...OFFFFFFFFO...",
-    "....OFMFFMFO....",
-    "....OKBBBBKO....",
-    "....OKKBBKKO....",
-    ".....OkkkkO.....",
-    "......OOOO......",
+    "................",
+    ".....OOOOOO.....",
+    "....OWWWWWWO....",
+    "...OWWWWWWWWO...",
+    "...OWWEEEEWWO...",
+    "...OWWWWWWWWO...",
+    "...OWWSSSSWWO...",
+    "...OWWSSSSWWO...",
+    "...OWWWWWWWWO...",
+    "....OWWWWWWO....",
+    "....W.W.W.W.....",
+    "................",
+    "................",
+    "................",
     "................",
 ])
 
 let idleFrame2: [[P]] = sprite([
     "................",
     "................",
-    ".......AA.......",
-    "......AaaA......",
-    ".....OOFFOO.....",
-    "....OFFLLFFO....",
-    "...OFFLWWLFFO...",
-    "...OFFAaaAFFO...",
-    "...OFFAAAAFFO...",
-    "...OFFFFfffFO...",
-    "...OFFFFFFFFO...",
-    "....OFMFFMFO....",
-    "....OKBBBBKO....",
-    "....OKKBBKKO....",
-    ".....OkkkkO.....",
-    "......OOOO......",
+    "................",
+    ".....OOOOOO.....",
+    "....OWWWWWWO....",
+    "...OWWWWWWWWO...",
+    "...OWWEEEEWWO...",
+    "...OWWWWWWWWO...",
+    "...OWWSSSSWWO...",
+    "...OWWSSSSWWO...",
+    "...OWWWWWWWWO...",
+    "....OWWWWWWO....",
+    "....W.W.W.W.....",
+    "................",
+    "................",
+    "................",
 ])
 
 let idleFrame3: [[P]] = sprite([
     "................",
-    ".......AA.......",
-    "......AaaA......",
-    ".....OOFFOO.....",
-    "...OOFFLLFFOO...",
-    "...OFFLWWLFFO...",
-    "...OFFAEaAFFO...",
-    "...OFFAEEAFFO...",
-    "...OFFFFfffFO...",
-    "...OFFFFFFFFO...",
-    "....OFFMMFFO....",
-    "....OKBBBBKO....",
-    "....OKBBKBKO....",
-    ".....OkkkkO.....",
-    "......OOOO......",
+    "................",
+    "......OOOOOO....",
+    ".....OWWWWWWO...",
+    "....OWWWWWWWWO..",
+    "....OWWEEEEWWO..",
+    "....OWWWWWWWWO..",
+    "....OWWSSSSWWO..",
+    "....OWWSSSSWWO..",
+    "....OWWWWWWWWO..",
+    ".....OWWWWWWO...",
+    ".....W.W.W.W....",
+    "................",
+    "................",
+    "................",
     "................",
 ])
 
@@ -107,57 +95,60 @@ let idleFrame3: [[P]] = sprite([
 
 let workFrame1: [[P]] = sprite([
     "..................",
-    "......AA..........",
-    ".....AaaA.........",
-    "....OOFFOO........",
-    "...OFFLLFFO.OOOO..",
-    "..OFFAEEAFFOOGGO..",
-    "..OFFAEEAFFOOGgO..",
-    "..OFFFFfffFOOOOO..",
-    "...OOFFFfOO.OOO...",
-    ".OOKKKKKKKKKKKOO..",
-    ".OKBBBBBBBBBBKBO..",
-    ".OKKBBKBBKBBKKO...",
-    "..OkkkkkkkkkkkO...",
-    "...OOOOOOOOOOO....",
+    "..................",
+    ".....OOOOOO.......",
+    "....OWWWWWWO......",
+    "...OWWWWWWWWO..TT.",
+    "...OWWEEEEWWO.TtT.",
+    "...OWWWWWWWWO.TTT.",
+    "...OWWSSSSWWO..t..",
+    "...OWWSSSSWWO.....",
+    "...OWWWWWWWWO.....",
+    "....OWWWWWWO......",
+    "....W.W.W.W.......",
+    "..................",
+    "..................",
+    "..................",
     "..................",
     "..................",
 ])
 
 let workFrame2: [[P]] = sprite([
     "..................",
-    "......AA..........",
-    ".....AaaA.........",
-    "....OOFFOO........",
-    "...OFFLLFFO.OOOO..",
-    "..OFFAEEAFFOOgGO..",
-    "..OFFAEEAFFOOGGO..",
-    "..OFFFffffFOOOOO..",
-    "...OOFFffOO.OOO...",
-    ".OOKKKKKKKKKKKOO..",
-    ".OKBBBBBBBBBBKBO..",
-    ".OKBKBKBBKBBKKO...",
-    "..OkkkkkkkkkkkO...",
-    "...OOOOOOOOOOO....",
+    "..................",
+    ".....OOOOOO.......",
+    "....OWWWWWWO......",
+    "...OWWWWWWWWO..tT.",
+    "...OWWEEEEWWO.TTT.",
+    "...OWWWWWWWWO.TtT.",
+    "...OWWSSSSWWO..T..",
+    "...OWWSSSSWWO.....",
+    "...OWWWWWWWWO.....",
+    "....OWWWWWWO......",
+    "....W.W.W.W.......",
+    "..................",
+    "..................",
+    "..................",
     "..................",
     "..................",
 ])
 
 let workFrame3: [[P]] = sprite([
     "..................",
-    ".......AA.........",
-    "......AaaA........",
-    ".....OOFFOO.......",
-    "....OFFLLFFO.OOOO.",
-    "...OFFAEEAFFOOGgO.",
-    "...OFFAEEAFFOOGGO.",
-    "...OFFFFfffFOOOO..",
-    "....OFFFFfOO.OO...",
-    "..OOKKKKKKKKKOO...",
-    ".OKBBBBBBBBBBKBO..",
-    ".OKKBBKBBKKBKKO...",
-    "..OkkkkkkkkkkO....",
-    "...OOOOOOOOOO.....",
+    "..................",
+    "......OOOOOO......",
+    ".....OWWWWWWO.....",
+    "....OWWWWWWWWO.T..",
+    "....OWWEEEEWWO.TT.",
+    "....OWWWWWWWWO.tT.",
+    "....OWWSSSSWWO.TT.",
+    "....OWWSSSSWWO....",
+    "....OWWWWWWWWO....",
+    ".....OWWWWWWO.....",
+    ".....W.W.W.W......",
+    "..................",
+    "..................",
+    "..................",
     "..................",
     "..................",
 ])
@@ -165,60 +156,60 @@ let workFrame3: [[P]] = sprite([
 // MARK: - Done Frames (16x16)
 
 let doneFrame1: [[P]] = sprite([
-    ".......A........",
-    "......AAA.......",
-    ".....AWWA.......",
-    ".....OOFFOO.....",
-    "...OOFFLLFFO....",
-    "...OFFAEEAFFOA..",
-    "..OFFFAEEAFFOAA.",
-    "..OFFFFfffFFOAA.",
-    "..OFFFFFFFfFFO..",
-    "...OOFFFFFfOO...",
-    "....OOFFFfOO....",
-    "...OkkkkkkkkO...",
-    "...OKKKKKKKKO...",
-    "....OOOOOOOO....",
-    "......O..O......",
+    ".......X........",
+    "......XXX.......",
     ".....OOOOOO.....",
+    "....OWWWWWWO....",
+    "...OWWWWWWWWO...",
+    "...OWWEEEEWWO...",
+    "...OWWWWWWWWO...",
+    "...OWWSSSSWWO...",
+    "...OWWSSSSWWO...",
+    "...OWWWWWWWWO...",
+    "....OWWWWWWO....",
+    "....W.W.W.W.....",
+    "................",
+    "................",
+    "................",
+    "................",
 ])
 
 let doneFrame2: [[P]] = sprite([
-    "......AA........",
-    ".....AWWA.......",
-    "....AAWWAA......",
-    ".....OOFFOO.....",
-    "...OOFFLLFFOA...",
-    "...OFFAEEAFFOAA.",
-    "..OFFFAEEAFFOAA.",
-    "..OFFFFfffFFOA..",
-    "..OFFFFFFFfFFO..",
-    "...OOFFFFFfOO...",
-    "....OOFFFfOO....",
-    "...OkkkkkkkkO...",
-    "...OKKKKKKKKO...",
-    "....OOOOOOOO....",
-    "......O..O......",
+    "............X...",
+    ".......X...XXX..",
     ".....OOOOOO.....",
+    "....OWWWWWWO....",
+    "...OWWWWWWWWO...",
+    "...OWWEEEEWWO...",
+    "...OWWWWWWWWO...",
+    "...OWWSSSSWWO...",
+    "...OWWSSSSWWO...",
+    "...OWWWWWWWWO...",
+    "....OWWWWWWO....",
+    "....W.W.W.W.....",
+    "................",
+    "................",
+    "................",
+    "................",
 ])
 
 let doneFrame3: [[P]] = sprite([
-    "...........X....",
-    ".......A..XXX...",
-    "......AAA..X....",
-    ".....AWWA.......",
-    "...OOFFLLFFOA...",
-    "..OFFAEEAFFO....",
-    "..OFFFAEEAFFOA..",
-    ".OFFFFfffFFFO...",
-    ".OFFFFFFFfFFO...",
-    "..OOFFFFFfOO....",
-    "...OOFFFfOO.....",
-    "..OkkkkkkkkO....",
-    "..OKKKKKKKKO....",
-    "...OOOOOOOO.....",
-    ".....O..O.......",
-    "....OOOOOO......",
+    "....X...........",
+    "...XXX..........",
+    ".....OOOOOO.....",
+    "....OWWWWWWO....",
+    "...OWWWWWWWWO...",
+    "...OWWEEEEWWO...",
+    "...OWWWWWWWWO...",
+    "...OWWSSSSWWO...",
+    "...OWWSSSSWWO...",
+    "...OWWWWWWWWO...",
+    "....OWWWWWWO....",
+    "....W.W.W.W.....",
+    "................",
+    "................",
+    "................",
+    "................",
 ])
 
 // MARK: - Sprite Renderer
