@@ -4,9 +4,9 @@ import AppKit
 
 struct Clr {
     let r: CGFloat, g: CGFloat, b: CGFloat, a: CGFloat
-    static let O = Clr(r: 0.09, g: 0.10, b: 0.12, a: 1)    // dark outline
-    static let W = Clr(r: 0.96, g: 0.97, b: 0.99, a: 1)    // body white
-    static let S = Clr(r: 0.80, g: 0.84, b: 0.89, a: 1)    // lower shadow
+    static let O = Clr(r: 0.85, g: 0.45, b: 0.22, a: 1)    // matches title color and removes visible border
+    static let W = Clr(r: 0.85, g: 0.45, b: 0.22, a: 1)    // body orange (same as app title)
+    static let S = Clr(r: 0.70, g: 0.33, b: 0.13, a: 1)    // lower orange shadow
     static let E = Clr(r: 0.12, g: 0.13, b: 0.16, a: 1)    // face details
     static let T = Clr(r: 0.47, g: 0.89, b: 0.66, a: 1)    // activity accent
     static let t = Clr(r: 0.24, g: 0.56, b: 0.42, a: 1)    // activity shadow
@@ -40,7 +40,7 @@ let idleFrame1: [[P]] = sprite([
     ".....OOOOOO.....",
     "....OWWWWWWO....",
     "...OWWWWWWWWO...",
-    "...OWWEEEEWWO...",
+    "...OWWEWWEWWO...",
     "...OWWWWWWWWO...",
     "...OWWSSSSWWO...",
     "...OWWSSSSWWO...",
@@ -60,7 +60,7 @@ let idleFrame2: [[P]] = sprite([
     ".....OOOOOO.....",
     "....OWWWWWWO....",
     "...OWWWWWWWWO...",
-    "...OWWEEEEWWO...",
+    "...OWWEWWEWWO...",
     "...OWWWWWWWWO...",
     "...OWWSSSSWWO...",
     "...OWWSSSSWWO...",
@@ -78,7 +78,7 @@ let idleFrame3: [[P]] = sprite([
     "......OOOOOO....",
     ".....OWWWWWWO...",
     "....OWWWWWWWWO..",
-    "....OWWEEEEWWO..",
+    "....OWWEWWEWWO..",
     "....OWWWWWWWWO..",
     "....OWWSSSSWWO..",
     "....OWWSSSSWWO..",
@@ -99,7 +99,7 @@ let workFrame1: [[P]] = sprite([
     ".....OOOOOO.......",
     "....OWWWWWWO......",
     "...OWWWWWWWWO..TT.",
-    "...OWWEEEEWWO.TtT.",
+    "...OWWEWWEWWO.TtT.",
     "...OWWWWWWWWO.TTT.",
     "...OWWSSSSWWO..t..",
     "...OWWSSSSWWO.....",
@@ -119,7 +119,7 @@ let workFrame2: [[P]] = sprite([
     ".....OOOOOO.......",
     "....OWWWWWWO......",
     "...OWWWWWWWWO..tT.",
-    "...OWWEEEEWWO.TTT.",
+    "...OWWEWWEWWO.TTT.",
     "...OWWWWWWWWO.TtT.",
     "...OWWSSSSWWO..T..",
     "...OWWSSSSWWO.....",
@@ -139,7 +139,7 @@ let workFrame3: [[P]] = sprite([
     "......OOOOOO......",
     ".....OWWWWWWO.....",
     "....OWWWWWWWWO.T..",
-    "....OWWEEEEWWO.TT.",
+    "....OWWEWWEWWO.TT.",
     "....OWWWWWWWWO.tT.",
     "....OWWSSSSWWO.TT.",
     "....OWWSSSSWWO....",
@@ -161,7 +161,7 @@ let doneFrame1: [[P]] = sprite([
     ".....OOOOOO.....",
     "....OWWWWWWO....",
     "...OWWWWWWWWO...",
-    "...OWWEEEEWWO...",
+    "...OWWEWWEWWO...",
     "...OWWWWWWWWO...",
     "...OWWSSSSWWO...",
     "...OWWSSSSWWO...",
@@ -180,7 +180,7 @@ let doneFrame2: [[P]] = sprite([
     ".....OOOOOO.....",
     "....OWWWWWWO....",
     "...OWWWWWWWWO...",
-    "...OWWEEEEWWO...",
+    "...OWWEWWEWWO...",
     "...OWWWWWWWWO...",
     "...OWWSSSSWWO...",
     "...OWWSSSSWWO...",
@@ -199,7 +199,7 @@ let doneFrame3: [[P]] = sprite([
     ".....OOOOOO.....",
     "....OWWWWWWO....",
     "...OWWWWWWWWO...",
-    "...OWWEEEEWWO...",
+    "...OWWEWWEWWO...",
     "...OWWWWWWWWO...",
     "...OWWSSSSWWO...",
     "...OWWSSSSWWO...",
