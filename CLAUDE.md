@@ -4,8 +4,24 @@ macOS floating always-on-top window that shows active Claude Code CLI sessions a
 
 ## Tech Stack
 - **Swift / AppKit** — native macOS app, no frameworks
-- Single file: `Sources/main.swift`
 - Built with `swift build`, run with `.build/debug/ClaudeMonitor`
+
+## File Structure
+- `Sources/main.swift` — entry point
+- `Sources/AppDelegate.swift` — lifecycle, polling, animation, menu bar, layout
+- `Sources/Sessions.swift` — SessionState, ClaudeSession, ClaudeNamer, SessionDetector
+- `Sources/Sprites.swift` — color palette, pixel art frames, renderer, cache
+- `Sources/Views.swift` — ClaudeSessionView, MonitorContentView, MonitorPanel, close button
+- `Sources/GhosttyIntegration.swift` — extension AppDelegate: jumpTo, AX helpers, tab switching
+
+## Install as macOS App
+```bash
+swift build -c release
+mkdir -p "/Applications/Claude Monitor.app/Contents/MacOS" "/Applications/Claude Monitor.app/Contents/Resources"
+cp .build/release/ClaudeMonitor "/Applications/Claude Monitor.app/Contents/MacOS/ClaudeMonitor"
+cp Info.plist "/Applications/Claude Monitor.app/Contents/Info.plist"
+```
+NEVER start/launch/open the app. The user will do it themselves.
 
 ## How It Works
 - Polls `ps -eo pid,tty,%cpu,command` every 2s on a background queue to find `claude` processes

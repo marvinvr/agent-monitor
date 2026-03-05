@@ -62,6 +62,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem?.menu = menu
     }
 
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
+
     @objc func showPanel() { panel.orderFront(nil) }
 
     func pollSessions() {
@@ -81,6 +83,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         content.subviews.forEach { $0.removeFromSuperview() }
         views.removeAll()
         content.addSubview(titleLabel)
+        content.addSubview(content.titleBar)
+        content.addSubview(content.closeButton)
 
         let cellW: CGFloat = 86, cellH: CGFloat = 90
         let pad: CGFloat = 16, titleH: CGFloat = 20

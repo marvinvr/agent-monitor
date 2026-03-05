@@ -96,6 +96,14 @@ class ClaudeSessionView: NSView {
     }
 }
 
+// MARK: - Draggable Title Bar
+
+class TitleBarView: NSView {
+    override func mouseDown(with event: NSEvent) {
+        window?.performDrag(with: event)
+    }
+}
+
 // MARK: - Panel Content View
 
 class CloseButtonView: NSView {
@@ -112,23 +120,28 @@ class CloseButtonView: NSView {
         let circle = bounds.insetBy(dx: 1, dy: 1)
         NSColor(red: 0.9, green: 0.3, blue: 0.3, alpha: 1.0).setFill()
         NSBezierPath(ovalIn: circle).fill()
-        let xAttrs: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: 9, weight: .bold),
-            .foregroundColor: NSColor(white: 0.0, alpha: 0.8)
-        ]
-        let xStr = NSAttributedString(string: "\u{2715}", attributes: xAttrs)
-        let sz = xStr.size()
-        xStr.draw(at: NSPoint(x: circle.midX - sz.width / 2, y: circle.midY - sz.height / 2))
+
+        NSColor(white: 0.0, alpha: 0.8).setStroke()
+        let inset: CGFloat = 4.5
+        let path = NSBezierPath()
+        path.lineWidth = 1.5
+        path.move(to: NSPoint(x: inset, y: inset))
+        path.line(to: NSPoint(x: bounds.width - inset, y: bounds.height - inset))
+        path.move(to: NSPoint(x: bounds.width - inset, y: inset))
+        path.line(to: NSPoint(x: inset, y: bounds.height - inset))
+        path.stroke()
     }
 }
 
 class MonitorContentView: NSView {
     let closeButton = CloseButtonView(frame: NSRect(x: 6, y: 0, width: 16, height: 16))
+    let titleBar = TitleBarView()
     private var trackingArea: NSTrackingArea?
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         closeButton.alphaValue = 0
+        addSubview(titleBar)
         addSubview(closeButton)
     }
     required init?(coder: NSCoder) { fatalError() }
@@ -157,6 +170,7 @@ class MonitorContentView: NSView {
     override func layout() {
         super.layout()
         closeButton.frame.origin = NSPoint(x: 6, y: bounds.height - 22)
+        titleBar.frame = NSRect(x: 0, y: bounds.height - 28, width: bounds.width, height: 28)
     }
 
     override func draw(_ dirtyRect: NSRect) {
@@ -182,7 +196,7 @@ class MonitorPanel: NSPanel {
         isOpaque = false
         backgroundColor = .clear
         hasShadow = true
-        isMovableByWindowBackground = true
+        isMovableByWindowBackground = false
         hidesOnDeactivate = false
         if let screen = NSScreen.main {
             let f = screen.visibleFrame

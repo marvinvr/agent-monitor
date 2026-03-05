@@ -19,6 +19,17 @@ swift build
 .build/debug/ClaudeMonitor
 ```
 
+## Install as macOS App
+
+```bash
+swift build -c release
+mkdir -p "/Applications/Claude Monitor.app/Contents/MacOS" "/Applications/Claude Monitor.app/Contents/Resources"
+cp .build/release/ClaudeMonitor "/Applications/Claude Monitor.app/Contents/MacOS/ClaudeMonitor"
+cp Info.plist "/Applications/Claude Monitor.app/Contents/Info.plist"
+```
+
+Then launch from Spotlight (Cmd+Space → "Claude Monitor") or open from `/Applications`.
+
 ## Requirements
 
 - macOS 13+
