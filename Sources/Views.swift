@@ -38,6 +38,21 @@ class ClaudeSessionView: NSView {
     override var isFlipped: Bool { false }
 
     override func draw(_ dirtyRect: NSRect) {
+        switch session.conversationMatchStatus {
+        case .unmatched:
+            NSColor(red: 0.95, green: 0.45, blue: 0.3, alpha: 0.18).setStroke()
+            let border = NSBezierPath(roundedRect: bounds.insetBy(dx: 1.5, dy: 1.5), xRadius: 6, yRadius: 6)
+            border.lineWidth = 2
+            border.stroke()
+        case .guessed:
+            NSColor(red: 0.95, green: 0.8, blue: 0.3, alpha: 0.18).setStroke()
+            let border = NSBezierPath(roundedRect: bounds.insetBy(dx: 1.5, dy: 1.5), xRadius: 6, yRadius: 6)
+            border.lineWidth = 2
+            border.stroke()
+        case .verified:
+            break
+        }
+
         if hovered {
             NSColor(white: 1.0, alpha: 0.12).setFill()
             NSBezierPath(roundedRect: bounds.insetBy(dx: 1, dy: 1), xRadius: 5, yRadius: 5).fill()
@@ -70,30 +85,53 @@ class ClaudeSessionView: NSView {
         case .done: color = NSColor(red: 0.3, green: 0.85, blue: 1.0, alpha: 1.0)
         case .idle: color = NSColor(white: 0.6, alpha: 0.9)
         }
-        let badgeColor: NSColor = session.tool == .claude
-            ? NSColor(red: 0.85, green: 0.45, blue: 0.22, alpha: 0.7)
-            : NSColor(red: 0.4, green: 0.7, blue: 0.9, alpha: 0.7)
         let nameAttrs: [NSAttributedString.Key: Any] = [
             .font: safeMonospacedFont(ofSize: 12, weight: .bold),
             .foregroundColor: color
         ]
-        let badgeAttrs: [NSAttributedString.Key: Any] = [
-            .font: safeMonospacedFont(ofSize: 9, weight: .medium),
-            .foregroundColor: badgeColor
+        let unmatchedAttrs: [NSAttributedString.Key: Any] = [
+            .font: safeMonospacedFont(ofSize: 9, weight: .bold),
+            .foregroundColor: NSColor(red: 0.95, green: 0.45, blue: 0.3, alpha: 0.95)
+        ]
+        let pendingAttrs: [NSAttributedString.Key: Any] = [
+            .font: safeMonospacedFont(ofSize: 9, weight: .bold),
+            .foregroundColor: NSColor(red: 0.95, green: 0.8, blue: 0.3, alpha: 0.95)
         ]
         let label = NSMutableAttributedString(string: name, attributes: nameAttrs)
-        label.append(NSAttributedString(string: "·\(session.toolBadge)", attributes: badgeAttrs))
+        if session.conversationMatchStatus == .unmatched {
+            label.append(NSAttributedString(string: "?", attributes: unmatchedAttrs))
+        } else if session.conversationMatchStatus == .guessed {
+            label.append(NSAttributedString(string: "~", attributes: pendingAttrs))
+        }
+        let subtitleText: String? = {
+            switch session.conversationMatchStatus {
+            case .unmatched: return "no match"
+            case .guessed: return "guess"
+            case .verified: break
+            }
+            return session.truncatedFolder
+        }()
+        let subtitleColor: NSColor = {
+            switch session.conversationMatchStatus {
+            case .unmatched:
+                return NSColor(red: 0.95, green: 0.45, blue: 0.3, alpha: 0.95)
+            case .guessed:
+                return NSColor(red: 0.95, green: 0.8, blue: 0.3, alpha: 0.95)
+            case .verified:
+                return NSColor(white: 0.55, alpha: 0.9)
+            }
+        }()
         let sz = label.size()
-        let nameY: CGFloat = session.truncatedFolder != nil ? 16 : 2
+        let nameY: CGFloat = subtitleText != nil ? 16 : 2
         label.draw(at: NSPoint(x: (bounds.width - sz.width) / 2, y: nameY))
 
-        // Folder subtitle
-        if let folder = session.truncatedFolder {
+        // Subtitle (folder or conversation status)
+        if let subtitle = subtitleText {
             let folderAttrs: [NSAttributedString.Key: Any] = [
                 .font: safeMonospacedFont(ofSize: 10, weight: .regular),
-                .foregroundColor: NSColor(white: 0.55, alpha: 0.9)
+                .foregroundColor: subtitleColor
             ]
-            let folderStr = NSAttributedString(string: folder, attributes: folderAttrs)
+            let folderStr = NSAttributedString(string: subtitle, attributes: folderAttrs)
             let fsz = folderStr.size()
             folderStr.draw(at: NSPoint(x: (bounds.width - fsz.width) / 2, y: 2))
         }
@@ -107,6 +145,15 @@ class ClaudeSessionView: NSView {
             for i in 0..<dots {
                 NSBezierPath(ovalIn: NSRect(x: sx + CGFloat(i) * 7, y: bounds.height - 6, width: 4, height: 4)).fill()
             }
+        }
+
+        // Conversation matching status marker, always visible in the top-right.
+        if session.conversationMatchStatus == .unmatched {
+            NSColor(red: 0.95, green: 0.45, blue: 0.3, alpha: 0.95).setFill()
+            NSBezierPath(ovalIn: NSRect(x: bounds.width - 13, y: bounds.height - 13, width: 10, height: 10)).fill()
+        } else if session.conversationMatchStatus == .guessed {
+            NSColor(red: 0.95, green: 0.8, blue: 0.3, alpha: 0.95).setFill()
+            NSBezierPath(ovalIn: NSRect(x: bounds.width - 13, y: bounds.height - 13, width: 10, height: 10)).fill()
         }
     }
 }

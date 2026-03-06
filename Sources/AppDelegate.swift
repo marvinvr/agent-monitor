@@ -83,8 +83,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             let newSessions = self.detector.detectSessions()
             DispatchQueue.main.async {
                 defer { self.isPolling = false }
-                let oldFP = self.sessions.map { "\($0.pid):\($0.state):\($0.tool)" }.joined()
-                let newFP = newSessions.map { "\($0.pid):\($0.state):\($0.tool)" }.joined()
+                let oldFP = self.sessions.map { "\($0.pid):\($0.state):\($0.tool):\($0.displayName):\($0.conversationMatchStatus.rawValue)" }.joined()
+                let newFP = newSessions.map { "\($0.pid):\($0.state):\($0.tool):\($0.displayName):\($0.conversationMatchStatus.rawValue)" }.joined()
                 self.sessions = newSessions
                 if oldFP != newFP { self.rebuildViews() }
             }
