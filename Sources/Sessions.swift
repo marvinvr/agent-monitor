@@ -368,6 +368,16 @@ private struct ClaudeIndexEntry {
     let modified: Date
 }
 
+private struct CachedTranscriptActivity {
+    let mtime: Date?
+    let activity: TranscriptActivity?
+}
+
+private struct CachedPathLookup {
+    let fetchedAt: Date
+    let path: String?
+}
+
 private struct TranscriptActivity {
     private static let workingGrace: TimeInterval = 8
     private static let toolWorkingGrace: TimeInterval = 90
@@ -491,8 +501,11 @@ class SessionDetector {
     private var claudeSessionPathById: [String: String] = [:]
     private var claudeIndexCacheByProjectPath: [String: [ClaudeIndexEntry]] = [:]
     private var claudeIndexMtimeByProjectPath: [String: Date] = [:]
+    private var transcriptActivityCacheByPath: [String: CachedTranscriptActivity] = [:]
+    private var cwdPathCacheByPid: [Int32: CachedPathLookup] = [:]
     private var remoteSnapshotCache: [SSHDestination: CachedRemoteSnapshot] = [:]
     private let remoteSnapshotTTL: TimeInterval = 4
+    private let cwdCacheTTL: TimeInterval = 3
 
     func detectSessions() -> [ClaudeSession] {
         guard let output = runProcess(path: "/bin/ps", arguments: ["-eo", "pid,ppid,tty,%cpu,command"]) else {
@@ -513,6 +526,7 @@ class SessionDetector {
         postWorkIdleTicks = postWorkIdleTicks.filter { alive.contains($0.key) }
         codexSessionPathByPid = codexSessionPathByPid.filter { alive.contains($0.key) }
         claudeSessionIdByPid = claudeSessionIdByPid.filter { alive.contains($0.key) }
+        cwdPathCacheByPid = cwdPathCacheByPid.filter { alive.contains($0.key) }
         let activeDestinations = Set(remoteSSHProxySessions(from: processes).map(\.destination))
         remoteSnapshotCache = remoteSnapshotCache.filter { activeDestinations.contains($0.key) }
 
@@ -555,7 +569,7 @@ class SessionDetector {
 
             let descendantCpu = (tool == .codex) ? descendantCPU(for: pid, byParent: byParent) : 0.0
             let smoothed = smoothedCPU(for: pid, cpu: process.cpu + descendantCpu)
-            let cwdPath = SessionDetector.cwdPath(forPid: pid)
+            let cwdPath = cachedCwdPath(forPid: pid)
             let folder = cwdPath.map { ($0 as NSString).lastPathComponent }
             let convo = conversationMeta(for: tool, pid: pid, cwdPath: cwdPath)
             let transcriptState = transcriptState(for: tool, conversation: convo)
@@ -925,14 +939,9 @@ class SessionDetector {
         else {
             return nil
         }
-        let activity: TranscriptActivity?
-        switch tool {
-        case .claude:
-            activity = parseClaudeTranscriptActivity(path: transcriptPath)
-        case .codex:
-            activity = parseCodexTranscriptActivity(path: transcriptPath)
-        }
-        return activity?.resolvedState(now: Date())
+        let now = Date()
+        let activity = cachedTranscriptActivity(for: tool, path: transcriptPath)
+        return activity?.resolvedState(now: now)
     }
 
     private func conversationMeta(for tool: SessionTool, pid: Int32, cwdPath: String?) -> ConversationMeta {
@@ -952,7 +961,7 @@ class SessionDetector {
         codexSessionPathByPid[pid] = path
         let mtime = Self.fileModificationDate(path: path)
         if let cached = codexMetaByPath[path],
-           codexMetaMtimeByPath[path] == mtime {
+           cached.firstPrompt != nil || codexMetaMtimeByPath[path] == mtime {
             return cached
         }
         let parsed = parseCodexSessionMeta(path: path)
@@ -1454,6 +1463,35 @@ class SessionDetector {
         return text.components(separatedBy: "\n")
     }
 
+    private func cachedCwdPath(forPid pid: Int32) -> String? {
+        let now = Date()
+        if let cached = cwdPathCacheByPid[pid],
+           now.timeIntervalSince(cached.fetchedAt) < cwdCacheTTL {
+            return cached.path
+        }
+        let path = Self.cwdPath(forPid: pid)
+        cwdPathCacheByPid[pid] = CachedPathLookup(fetchedAt: now, path: path)
+        return path
+    }
+
+    private func cachedTranscriptActivity(for tool: SessionTool, path: String) -> TranscriptActivity? {
+        let mtime = Self.fileModificationDate(path: path)
+        if let cached = transcriptActivityCacheByPath[path],
+           cached.mtime == mtime {
+            return cached.activity
+        }
+
+        let activity: TranscriptActivity?
+        switch tool {
+        case .claude:
+            activity = parseClaudeTranscriptActivity(path: path)
+        case .codex:
+            activity = parseCodexTranscriptActivity(path: path)
+        }
+        transcriptActivityCacheByPath[path] = CachedTranscriptActivity(mtime: mtime, activity: activity)
+        return activity
+    }
+
     private static func readTailLines(path: String, maxBytes: Int) -> [String]? {
         let url = URL(fileURLWithPath: path)
         guard let text = readTail(of: url, maxBytes: maxBytes) else { return nil }
@@ -1494,16 +1532,25 @@ class SessionDetector {
     }
 
     private static func parseISO8601(_ value: String) -> Date? {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let date = formatter.date(from: value) { return date }
-        formatter.formatOptions = [.withInternetDateTime]
-        return formatter.date(from: value)
+        if let date = iso8601FractionalFormatter.date(from: value) { return date }
+        return iso8601Formatter.date(from: value)
     }
 
     private static func fileModificationDate(path: String) -> Date? {
         (try? FileManager.default.attributesOfItem(atPath: path)[.modificationDate] as? Date) ?? nil
     }
+
+    private static let iso8601FractionalFormatter: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
+
+    private static let iso8601Formatter: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        return formatter
+    }()
 
     static func cwdPath(forPid pid: Int32) -> String? {
         let pipe = Pipe()

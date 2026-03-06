@@ -12,7 +12,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var sprites: SpriteCache!
     var loadingView: LoadingPlaceholderView?
     private let pollQueue = DispatchQueue(label: "com.mvr.agent-monitor.poll", qos: .utility)
+    private let pollInterval: TimeInterval = 1.0
     private var isPolling = false
+    private var pollRequestedWhileBusy = false
     private var hasCompletedInitialPoll = false
     private let stayAliveReason = "Agent Monitor should remain running in the background"
     private let cellW: CGFloat = 86
@@ -41,7 +43,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         panel.orderFront(nil)
         setupMenuBar()
 
-        Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
+        Timer.scheduledTimer(withTimeInterval: pollInterval, repeats: true) { [weak self] _ in
             self?.pollSessions()
         }
         Timer.scheduledTimer(withTimeInterval: 0.33, repeats: true) { [weak self] _ in
@@ -85,18 +87,27 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     @objc func showPanel() { panel.orderFront(nil) }
 
     func pollSessions() {
-        guard !isPolling else { return }
+        guard !isPolling else {
+            pollRequestedWhileBusy = true
+            return
+        }
         isPolling = true
+        pollRequestedWhileBusy = false
         pollQueue.async {
             let newSessions = self.detector.detectSessions()
             DispatchQueue.main.async {
-                defer { self.isPolling = false }
                 let oldFP = self.sessions.map { "\($0.pid):\($0.state):\($0.tool):\($0.displayName):\($0.conversationMatchStatus.rawValue)" }.joined()
                 let newFP = newSessions.map { "\($0.pid):\($0.state):\($0.tool):\($0.displayName):\($0.conversationMatchStatus.rawValue)" }.joined()
                 let isInitialPoll = !self.hasCompletedInitialPoll
                 self.hasCompletedInitialPoll = true
                 self.sessions = newSessions
                 if isInitialPoll || oldFP != newFP { self.rebuildViews() }
+                let shouldPollAgain = self.pollRequestedWhileBusy
+                self.pollRequestedWhileBusy = false
+                self.isPolling = false
+                if shouldPollAgain {
+                    self.pollSessions()
+                }
             }
         }
     }
