@@ -10,9 +10,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var titleLabel: NSTextField!
     var statusItem: NSStatusItem?
     var sprites: SpriteCache!
-    private let pollQueue = DispatchQueue(label: "com.mvr.claude-monitor.poll", qos: .utility)
+    private let pollQueue = DispatchQueue(label: "com.mvr.agent-monitor.poll", qos: .utility)
     private var isPolling = false
-    private let stayAliveReason = "Claude Monitor should remain running in the background"
+    private let stayAliveReason = "Agent Monitor should remain running in the background"
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -25,7 +25,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         content.wantsLayer = true
         panel.contentView = content
 
-        titleLabel = NSTextField(labelWithString: "Claude Monitor")
+        titleLabel = NSTextField(labelWithString: "Agent Monitor")
         titleLabel.font = safeMonospacedFont(ofSize: 12, weight: .bold)
         titleLabel.textColor = NSColor(red: 0.85, green: 0.45, blue: 0.22, alpha: 1.0)
         content.addSubview(titleLabel)

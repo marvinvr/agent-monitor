@@ -99,10 +99,10 @@ struct ClaudeSession: Hashable {
 
 enum ClaudeNamer {
     private static let names = [
-        "ace", "bay", "cor", "dax", "elm", "fox", "gem", "hex",
-        "ion", "jax", "kai", "lux", "max", "neo", "orb", "pax",
-        "qor", "ray", "sol", "tau", "uno", "vex", "wex", "xen",
-        "yew", "zed",
+        "acorn", "basil", "cinder", "duney", "ember", "fable", "grove", "helix",
+        "ivory", "julep", "kestl", "lumen", "mirth", "noble", "orbit", "pacer",
+        "quill", "rivet", "sonic", "talon", "ultra", "vivid", "woven", "xyloi",
+        "yonder", "zephyr",
     ]
 
     private static var cache: [String: String] = [:]
@@ -145,6 +145,7 @@ private struct ConversationMeta {
     let id: String?
     let firstPrompt: String?
     let matchStatus: ConversationMatchStatus
+    let transcriptPath: String?
 }
 
 // MARK: - One-Word Title Generation
@@ -195,7 +196,8 @@ private final class ConversationTitleGenerator {
         guard !lower.isEmpty, !containsMetaMarkers(lower) else { return nil }
         if let pathTitle = titleFromPath(prompt) { return pathTitle }
         if let keywordTitle = keywordTitle(from: lower) { return keywordTitle }
-        return salientWord(from: lower)
+        guard let title = salientWord(from: lower), !isBannedTitle(title) else { return nil }
+        return title
     }
 
     private static func containsMetaMarkers(_ lower: String) -> Bool {
@@ -211,6 +213,17 @@ private final class ConversationTitleGenerator {
             "<system_instruction>",
         ]
         return markers.contains(where: { lower.contains($0) })
+    }
+
+    private static func isBannedTitle(_ word: String) -> Bool {
+        let banned: Set<String> = [
+            "what", "when", "where", "which", "while", "whats", "why", "how",
+            "look", "make", "need", "want", "with", "this", "that", "there",
+            "here", "please", "understand", "sometimes", "something", "random",
+            "claude", "codex", "agent", "agents", "session", "sessions",
+            "conversation", "conversations", "match", "title", "names", "name",
+        ]
+        return banned.contains(word)
     }
 
     private static func titleFromPath(_ prompt: String) -> String? {
@@ -266,11 +279,12 @@ private final class ConversationTitleGenerator {
         let stop: Set<String> = [
             "about", "agent", "agents", "app", "around", "background", "both", "can", "claude",
             "codex", "components", "conversation", "conversations", "could", "debug", "first",
-            "from", "hard", "help", "idk", "input", "just", "like", "look", "make", "maybe",
+            "from", "hard", "help", "how", "idk", "input", "just", "like", "look", "make", "maybe",
             "name", "names", "next", "please", "process", "processes", "project", "random",
             "really", "session", "sessions", "should", "smth", "something", "sometimes",
             "still", "task", "that", "there", "thing", "think", "title", "understand",
-            "using", "want", "with", "work", "working", "would", "your",
+            "using", "want", "what", "when", "where", "which", "while", "with",
+            "work", "working", "would", "why", "your",
         ]
         let preferred: Set<String> = [
             "analytics", "editor", "monitor", "matching", "crash", "timeline", "pricing",
@@ -327,6 +341,42 @@ private struct ClaudeIndexEntry {
     let modified: Date
 }
 
+private struct TranscriptActivity {
+    private static let workingGrace: TimeInterval = 8
+    private static let idleDelay: TimeInterval = 600
+
+    var openCallIds: Set<String> = []
+    var lastActivityAt: Date?
+    var lastCompletionAt: Date?
+    var sawRelevantEvent = false
+
+    mutating func markActivity(_ date: Date) {
+        sawRelevantEvent = true
+        if lastActivityAt == nil || date > lastActivityAt! {
+            lastActivityAt = date
+        }
+    }
+
+    mutating func markCompletion(_ date: Date) {
+        sawRelevantEvent = true
+        if lastCompletionAt == nil || date > lastCompletionAt! {
+            lastCompletionAt = date
+        }
+    }
+
+    func resolvedState(now: Date) -> SessionState? {
+        guard sawRelevantEvent else { return nil }
+        if !openCallIds.isEmpty { return .working }
+        if let lastActivityAt, now.timeIntervalSince(lastActivityAt) <= Self.workingGrace {
+            return .working
+        }
+        if let lastCompletionAt, now.timeIntervalSince(lastCompletionAt) <= Self.idleDelay {
+            return .done
+        }
+        return .idle
+    }
+}
+
 // MARK: - Session Detector
 
 class SessionDetector {
@@ -340,10 +390,12 @@ class SessionDetector {
     }
 
     private var cpuHistory: [Int32: [Double]] = [:]
+    private var lastCpuActivityAt: [Int32: Date] = [:]
     private var wasWorking: Set<Int32> = []
     private var workingTickCount: [Int32: Int] = [:]
     private var postWorkIdleTicks: [Int32: Int] = [:]
-    private let doneDisplayTicks = 2
+    private let cpuWorkingGrace: TimeInterval = 8
+    private let cpuIdleDelay: TimeInterval = 600
     private let titleGenerator = ConversationTitleGenerator()
 
     private var codexSessionPathByPid: [Int32: String] = [:]
@@ -381,7 +433,7 @@ class SessionDetector {
             else if process.binaryName == "codex" { tool = .codex }
             else { continue }
 
-            if process.command.contains("ClaudeMonitor") { continue }
+            if process.command.contains("AgentMonitor") { continue }
 
             let tty = process.tty
             guard tty != "??" else { continue }
@@ -404,38 +456,12 @@ class SessionDetector {
             cpuHistory[pid] = hist
             let smoothed = hist.reduce(0, +) / Double(hist.count)
 
-            let cpuThreshold = (tool == .codex) ? 1.25 : 8.0
-            let requiredTicks = (tool == .codex) ? 1 : 2
-            let cpuHigh = smoothed > cpuThreshold
-            if cpuHigh {
-                workingTickCount[pid] = (workingTickCount[pid] ?? 0) + 1
-            } else {
-                workingTickCount[pid] = 0
-            }
-            let isWorking = (workingTickCount[pid] ?? 0) >= requiredTicks
-
-            let state: SessionState
-            if isWorking {
-                wasWorking.insert(pid)
-                postWorkIdleTicks[pid] = 0
-                state = .working
-            } else if wasWorking.contains(pid) {
-                let idleTicks = (postWorkIdleTicks[pid] ?? 0) + 1
-                postWorkIdleTicks[pid] = idleTicks
-                if idleTicks <= doneDisplayTicks {
-                    state = .done
-                } else {
-                    wasWorking.remove(pid)
-                    postWorkIdleTicks[pid] = 0
-                    state = .idle
-                }
-            } else {
-                state = .idle
-            }
-
             let cwdPath = SessionDetector.cwdPath(forPid: pid)
             let folder = cwdPath.map { ($0 as NSString).lastPathComponent }
             let convo = conversationMeta(for: tool, pid: pid, cwdPath: cwdPath)
+            let transcriptState = transcriptState(for: tool, conversation: convo)
+            let cpuState = cpuDrivenState(for: pid, tool: tool, smoothedCpu: smoothed)
+            let state = transcriptState ?? cpuState
             let conversationKey = convo.id.map { "\(tool.rawValue):\($0)" }
             let title: String?
             if convo.matchStatus == .verified,
@@ -457,6 +483,7 @@ class SessionDetector {
 
         let alive = Set(sessions.map { $0.pid })
         cpuHistory = cpuHistory.filter { alive.contains($0.key) }
+        lastCpuActivityAt = lastCpuActivityAt.filter { alive.contains($0.key) }
         wasWorking = wasWorking.filter { alive.contains($0) }
         workingTickCount = workingTickCount.filter { alive.contains($0.key) }
         postWorkIdleTicks = postWorkIdleTicks.filter { alive.contains($0.key) }
@@ -519,6 +546,59 @@ class SessionDetector {
         postWorkIdleTicks.removeValue(forKey: pid)
     }
 
+    private func cpuDrivenState(for pid: Int32, tool: SessionTool, smoothedCpu: Double) -> SessionState {
+        let now = Date()
+        let cpuThreshold = (tool == .codex) ? 1.25 : 8.0
+        let requiredTicks = (tool == .codex) ? 1 : 2
+        let cpuHigh = smoothedCpu > cpuThreshold
+        if cpuHigh {
+            workingTickCount[pid] = (workingTickCount[pid] ?? 0) + 1
+        } else {
+            workingTickCount[pid] = 0
+        }
+        let isWorking = (workingTickCount[pid] ?? 0) >= requiredTicks
+
+        if isWorking {
+            lastCpuActivityAt[pid] = now
+            wasWorking.insert(pid)
+            postWorkIdleTicks[pid] = 0
+            return .working
+        }
+        if let lastCpuActivityAt = lastCpuActivityAt[pid] {
+            let quietFor = now.timeIntervalSince(lastCpuActivityAt)
+            if quietFor <= cpuWorkingGrace {
+                wasWorking.insert(pid)
+                postWorkIdleTicks[pid] = 0
+                return .working
+            }
+            if quietFor <= cpuIdleDelay {
+                wasWorking.insert(pid)
+                return .done
+            }
+        }
+        if wasWorking.contains(pid) {
+            wasWorking.remove(pid)
+            postWorkIdleTicks[pid] = 0
+        }
+        return .idle
+    }
+
+    private func transcriptState(for tool: SessionTool, conversation: ConversationMeta) -> SessionState? {
+        guard conversation.matchStatus == .verified,
+              let transcriptPath = conversation.transcriptPath
+        else {
+            return nil
+        }
+        let activity: TranscriptActivity?
+        switch tool {
+        case .claude:
+            activity = parseClaudeTranscriptActivity(path: transcriptPath)
+        case .codex:
+            activity = parseCodexTranscriptActivity(path: transcriptPath)
+        }
+        return activity?.resolvedState(now: Date())
+    }
+
     private func conversationMeta(for tool: SessionTool, pid: Int32, cwdPath: String?) -> ConversationMeta {
         switch tool {
         case .codex:
@@ -531,7 +611,7 @@ class SessionDetector {
     private func codexConversationMeta(forPid pid: Int32) -> ConversationMeta {
         let sessionPath = codexSessionPathByPid[pid] ?? codexSessionPath(forPid: pid)
         guard let path = sessionPath else {
-            return ConversationMeta(id: nil, firstPrompt: nil, matchStatus: .unmatched)
+            return ConversationMeta(id: nil, firstPrompt: nil, matchStatus: .unmatched, transcriptPath: nil)
         }
         codexSessionPathByPid[pid] = path
         if let cached = codexMetaByPath[path] { return cached }
@@ -541,18 +621,29 @@ class SessionDetector {
     }
 
     private func claudeConversationMeta(forPid pid: Int32, cwdPath: String?) -> ConversationMeta {
-        let exactSessionId = claudeSessionIdByPid[pid] ?? claudeSessionId(forPid: pid)
-        let fallbackSessionId = exactSessionId == nil ? claudeFallbackSessionId(forPid: pid, cwdPath: cwdPath) : nil
+        let discoveredExactSessionId = claudeSessionId(forPid: pid)
+        let cachedSessionId = claudeSessionIdByPid[pid]
+        let cachedVerifiedSessionId = cachedSessionId.flatMap {
+            claudeMetaBySessionId[$0]?.matchStatus == .verified ? $0 : nil
+        }
+        let cachedGuessedSessionId = cachedSessionId.flatMap {
+            claudeMetaBySessionId[$0]?.matchStatus == .guessed ? $0 : nil
+        }
+        let exactSessionId = discoveredExactSessionId ?? cachedVerifiedSessionId
+        let fallbackSessionId = exactSessionId == nil
+            ? (cachedGuessedSessionId ?? claudeFallbackSessionId(forPid: pid, cwdPath: cwdPath))
+            : nil
         let matchStatus: ConversationMatchStatus = exactSessionId != nil ? .verified : (fallbackSessionId != nil ? .guessed : .unmatched)
         guard let sid = exactSessionId ?? fallbackSessionId else {
-            return ConversationMeta(id: nil, firstPrompt: nil, matchStatus: .unmatched)
+            return ConversationMeta(id: nil, firstPrompt: nil, matchStatus: .unmatched, transcriptPath: nil)
         }
         claudeSessionIdByPid[pid] = sid
         if let cached = claudeMetaBySessionId[sid] {
             let merged = ConversationMeta(
                 id: cached.id,
                 firstPrompt: cached.firstPrompt,
-                matchStatus: cached.matchStatus.merged(with: matchStatus)
+                matchStatus: cached.matchStatus.merged(with: matchStatus),
+                transcriptPath: cached.transcriptPath
             )
             claudeMetaBySessionId[sid] = merged
             return merged
@@ -562,7 +653,8 @@ class SessionDetector {
             let empty = ConversationMeta(
                 id: sid,
                 firstPrompt: Self.cleanPrompt(indexPrompt),
-                matchStatus: matchStatus
+                matchStatus: matchStatus,
+                transcriptPath: nil
             )
             claudeMetaBySessionId[sid] = empty
             return empty
@@ -705,7 +797,7 @@ class SessionDetector {
 
     private func parseCodexSessionMeta(path: String) -> ConversationMeta {
         guard let lines = Self.readAllLines(path: path) else {
-            return ConversationMeta(id: nil, firstPrompt: nil, matchStatus: .unmatched)
+            return ConversationMeta(id: nil, firstPrompt: nil, matchStatus: .unmatched, transcriptPath: nil)
         }
         var sessionId: String?
         var promptCandidates: [String] = []
@@ -732,13 +824,14 @@ class SessionDetector {
         return ConversationMeta(
             id: sessionId ?? Self.codexIdFromPath(path),
             firstPrompt: Self.pickPrompt(from: promptCandidates),
-            matchStatus: .verified
+            matchStatus: .verified,
+            transcriptPath: path
         )
     }
 
     private func parseClaudeSessionMeta(path: String, sessionId: String, matchStatus: ConversationMatchStatus) -> ConversationMeta {
         guard let lines = Self.readAllLines(path: path) else {
-            return ConversationMeta(id: sessionId, firstPrompt: nil, matchStatus: matchStatus)
+            return ConversationMeta(id: sessionId, firstPrompt: nil, matchStatus: matchStatus, transcriptPath: path)
         }
         var promptCandidates: [String] = []
 
@@ -759,7 +852,141 @@ class SessionDetector {
             }
         }
 
-        return ConversationMeta(id: sessionId, firstPrompt: Self.pickPrompt(from: promptCandidates), matchStatus: matchStatus)
+        return ConversationMeta(id: sessionId, firstPrompt: Self.pickPrompt(from: promptCandidates), matchStatus: matchStatus, transcriptPath: path)
+    }
+
+    private func parseClaudeTranscriptActivity(path: String) -> TranscriptActivity? {
+        guard let lines = Self.readTailLines(path: path, maxBytes: 360_000) else { return nil }
+        var activity = TranscriptActivity()
+
+        for line in lines {
+            guard let data = line.data(using: .utf8),
+                  let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let timestamp = (object["timestamp"] as? String).flatMap(Self.parseISO8601)
+            else { continue }
+
+            switch object["type"] as? String {
+            case "assistant":
+                guard let message = object["message"] as? [String: Any] else { continue }
+                let stopReason = message["stop_reason"] as? String
+                var hasToolUse = false
+                if let content = message["content"] as? [[String: Any]] {
+                    for item in content {
+                        if item["type"] as? String == "tool_use",
+                           let callId = item["id"] as? String {
+                            activity.openCallIds.insert(callId)
+                            hasToolUse = true
+                        }
+                    }
+                }
+                if stopReason == "end_turn" {
+                    activity.openCallIds.removeAll()
+                    activity.markCompletion(timestamp)
+                } else if hasToolUse || (message["role"] as? String) == "assistant" {
+                    activity.markActivity(timestamp)
+                }
+            case "user":
+                guard let message = object["message"] as? [String: Any] else { continue }
+                if let content = message["content"] as? [[String: Any]] {
+                    for item in content {
+                        if item["type"] as? String == "tool_result",
+                           let callId = item["tool_use_id"] as? String {
+                            activity.openCallIds.remove(callId)
+                            activity.markActivity(timestamp)
+                        }
+                    }
+                }
+            case "progress":
+                guard let data = object["data"] as? [String: Any],
+                      data["type"] as? String == "hook_progress"
+                else { continue }
+                let hookEvent = data["hookEvent"] as? String
+                if hookEvent == "Stop" {
+                    activity.openCallIds.removeAll()
+                    activity.markCompletion(timestamp)
+                } else {
+                    if let callId = object["toolUseID"] as? String {
+                        if hookEvent == "PreToolUse" {
+                            activity.openCallIds.insert(callId)
+                        } else if hookEvent == "PostToolUse" {
+                            activity.openCallIds.remove(callId)
+                        }
+                    }
+                    activity.markActivity(timestamp)
+                }
+            default:
+                continue
+            }
+        }
+
+        return activity.sawRelevantEvent ? activity : nil
+    }
+
+    private func parseCodexTranscriptActivity(path: String) -> TranscriptActivity? {
+        guard let lines = Self.readTailLines(path: path, maxBytes: 300_000) else { return nil }
+        var activity = TranscriptActivity()
+
+        for line in lines {
+            guard let data = line.data(using: .utf8),
+                  let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let timestamp = (object["timestamp"] as? String).flatMap(Self.parseISO8601)
+            else { continue }
+
+            switch object["type"] as? String {
+            case "event_msg":
+                guard let payload = object["payload"] as? [String: Any],
+                      let payloadType = payload["type"] as? String
+                else { continue }
+                if payloadType == "task_started" {
+                    activity.markActivity(timestamp)
+                } else if payloadType == "task_complete" {
+                    activity.markCompletion(timestamp)
+                } else if payloadType == "agent_message",
+                          (payload["phase"] as? String) == "commentary" {
+                    activity.markActivity(timestamp)
+                }
+            case "response_item":
+                guard let payload = object["payload"] as? [String: Any],
+                      let payloadType = payload["type"] as? String
+                else { continue }
+                switch payloadType {
+                case "function_call":
+                    if let callId = payload["call_id"] as? String {
+                        activity.openCallIds.insert(callId)
+                    }
+                    activity.markActivity(timestamp)
+                case "function_call_output":
+                    if let callId = payload["call_id"] as? String {
+                        activity.openCallIds.remove(callId)
+                    }
+                    activity.markActivity(timestamp)
+                    if activity.openCallIds.isEmpty {
+                        activity.markCompletion(timestamp)
+                    }
+                case "custom_tool_call":
+                    activity.markActivity(timestamp)
+                    if (payload["status"] as? String) == "completed" {
+                        activity.markCompletion(timestamp)
+                    }
+                case "reasoning":
+                    activity.markActivity(timestamp)
+                case "message":
+                    let role = payload["role"] as? String
+                    let phase = payload["phase"] as? String
+                    if role == "assistant" && phase == "commentary" {
+                        activity.markActivity(timestamp)
+                    } else if role == "assistant" {
+                        activity.markCompletion(timestamp)
+                    }
+                default:
+                    continue
+                }
+            default:
+                continue
+            }
+        }
+
+        return activity.sawRelevantEvent ? activity : nil
     }
 
     private static func extractCodexUserText(from object: [String: Any]) -> String? {
@@ -876,6 +1103,12 @@ class SessionDetector {
 
     private static func readAllLines(path: String) -> [String]? {
         guard let text = try? String(contentsOfFile: path, encoding: .utf8) else { return nil }
+        return text.components(separatedBy: "\n")
+    }
+
+    private static func readTailLines(path: String, maxBytes: Int) -> [String]? {
+        let url = URL(fileURLWithPath: path)
+        guard let text = readTail(of: url, maxBytes: maxBytes) else { return nil }
         return text.components(separatedBy: "\n")
     }
 

@@ -3,15 +3,15 @@
 <plist version="1.0">
 <dict>
     <key>CFBundleName</key>
-    <string>Claude Monitor</string>
+    <string>Agent Monitor</string>
     <key>CFBundleIdentifier</key>
-    <string>com.mvr.claude-monitor</string>
+    <string>com.mvr.agent-monitor</string>
     <key>CFBundleVersion</key>
     <string>1.0</string>
     <key>CFBundleShortVersionString</key>
     <string>1.0</string>
     <key>CFBundleExecutable</key>
-    <string>ClaudeMonitor</string>
+    <string>AgentMonitor</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>LSUIElement</key>

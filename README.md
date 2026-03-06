@@ -1,4 +1,4 @@
-# Claude Monitor
+# Agent Monitor
 
 macOS floating window that shows your active Claude Code CLI sessions as pixel art sprites.
 
@@ -16,19 +16,19 @@ macOS floating window that shows your active Claude Code CLI sessions as pixel a
 
 ```bash
 swift build
-.build/debug/ClaudeMonitor
+.build/debug/AgentMonitor
 ```
 
 ## Install as macOS App
 
 ```bash
 swift build -c release
-mkdir -p "/Applications/Claude Monitor.app/Contents/MacOS" "/Applications/Claude Monitor.app/Contents/Resources"
-cp .build/release/ClaudeMonitor "/Applications/Claude Monitor.app/Contents/MacOS/ClaudeMonitor"
-cp Info.plist "/Applications/Claude Monitor.app/Contents/Info.plist"
+mkdir -p "/Applications/Agent Monitor.app/Contents/MacOS" "/Applications/Agent Monitor.app/Contents/Resources"
+cp .build/release/AgentMonitor "/Applications/Agent Monitor.app/Contents/MacOS/AgentMonitor"
+cp Info.plist "/Applications/Agent Monitor.app/Contents/Info.plist"
 ```
 
-Then launch from Spotlight (Cmd+Space → "Claude Monitor") or open from `/Applications`.
+Then launch from Spotlight (Cmd+Space -> "Agent Monitor") or open from `/Applications`.
 
 ## Requirements
 

@@ -11,6 +11,13 @@ struct Clr {
     static let T = Clr(r: 0.47, g: 0.89, b: 0.66, a: 1)    // activity accent
     static let t = Clr(r: 0.24, g: 0.56, b: 0.42, a: 1)    // activity shadow
     static let X = Clr(r: 0.99, g: 0.88, b: 0.42, a: 1)    // done spark
+    static let N = Clr(r: 0.06, g: 0.09, b: 0.13, a: 1)    // codex outline
+    static let C = Clr(r: 0.91, g: 0.95, b: 1.00, a: 1)    // codex highlight
+    static let G = Clr(r: 0.74, g: 0.79, b: 0.86, a: 1)    // codex gray accent
+    static let g = Clr(r: 0.43, g: 0.48, b: 0.56, a: 1)    // codex gray shadow
+    static let A = Clr(r: 0.50, g: 0.84, b: 0.76, a: 1)    // codex accent
+    static let a = Clr(r: 0.18, g: 0.36, b: 0.45, a: 1)    // codex accent shadow
+    static let R = Clr(r: 0.76, g: 0.96, b: 0.84, a: 1)    // codex resolved core
 }
 
 // MARK: - Sprite Parsing
@@ -19,6 +26,7 @@ typealias P = Clr?
 
 private let spritePalette: [Character: P] = [
     ".": nil, "O": .O, "W": .W, "S": .S, "E": .E, "T": .T, "t": .t, "X": .X,
+    "N": .N, "C": .C, "G": .G, "g": .g, "A": .A, "a": .a, "R": .R,
 ]
 
 func sprite(_ rows: [String]) -> [[P]] {
@@ -212,6 +220,186 @@ let doneFrame3: [[P]] = sprite([
     "................",
 ])
 
+// MARK: - Codex Idle Frames (16x16)
+
+let codexIdleFrame1: [[P]] = sprite([
+    "................",
+    "................",
+    ".....NNNNNN.....",
+    "....NNCCCCNN....",
+    "...NNCCAACCNN...",
+    "..NNCA.EE.ACNN..",
+    "..NCC......CCN..",
+    "..NCC..EEE.CCN..",
+    "..NCGGGGGGGGCN..",
+    "..NCAAGGGGAACN..",
+    "...NAA....AAN...",
+    ".....a....a.....",
+    "......gggg......",
+    "................",
+    "................",
+    "................",
+])
+
+let codexIdleFrame2: [[P]] = sprite([
+    "................",
+    ".....NNNNNN.....",
+    "....NNCCCCNN....",
+    "...NNCCAACCNN...",
+    "..NNCA.EE.ACNN..",
+    "..NCC......CCN..",
+    "..NCC..EEE.CCN..",
+    "..NCGGGGGGGGCN..",
+    "..NCAAGGGGAACN..",
+    "...NAA....AAN...",
+    ".....a....a.....",
+    "......gggg......",
+    "................",
+    "................",
+    "................",
+    "................",
+])
+
+let codexIdleFrame3: [[P]] = sprite([
+    "................",
+    "................",
+    "......NNNNNN....",
+    ".....NNCCCCNN...",
+    "....NNCCAACCNN..",
+    "...NNCA.EE.ACNN.",
+    "...NCC......CCN.",
+    "...NCC..EEE.CCN.",
+    "...NCGGGGGGGGCN.",
+    "...NCAAGGGGAACN.",
+    "....NAA....AAN..",
+    "......a....a....",
+    ".......gggg.....",
+    "................",
+    "................",
+    "................",
+])
+
+// MARK: - Codex Working Frames (18x16)
+
+let codexWorkFrame1: [[P]] = sprite([
+    "..............AA..",
+    ".....NNNNNN...Aa..",
+    "....NNCCCCNN......",
+    "...NNCCAACCNN.....",
+    "..NNCA.EE.ACNN....",
+    "..NCC......CCN....",
+    "..NCC..EEE.CCN....",
+    "..NCGGGGGGGGCN....",
+    "..NCAAGGGGAACN....",
+    "...NAA....AAN.....",
+    ".....a....a.......",
+    "......gggg........",
+    "..................",
+    "..................",
+    "..................",
+    "..................",
+    "..................",
+])
+
+let codexWorkFrame2: [[P]] = sprite([
+    "........AA........",
+    "........Aa........",
+    ".....NNNNNN.......",
+    "....NNCCCCNN......",
+    "...NNCCAACCNN.....",
+    "..NNCA.EE.ACNN....",
+    "..NCC......CCN....",
+    "..NCC..EEE.CCN....",
+    "..NCGGGGGGGGCN....",
+    "..NCAAGGGGAACN....",
+    "...NAA....AAN.....",
+    ".....a....a.......",
+    "......gggg........",
+    "..................",
+    "..................",
+    "..................",
+    "..................",
+])
+
+let codexWorkFrame3: [[P]] = sprite([
+    "..AA..............",
+    "..aA..............",
+    ".....NNNNNN.......",
+    "....NNCCCCNN......",
+    "...NNCCAACCNN.....",
+    "..NNCA.EE.ACNN....",
+    "..NCC......CCN....",
+    "..NCC..EEE.CCN....",
+    "..NCGGGGGGGGCN....",
+    "..NCAAGGGGAACN....",
+    "...NAA....AAN.....",
+    ".....a....a.......",
+    "......gggg........",
+    "..................",
+    "..................",
+    "..................",
+    "..................",
+])
+
+// MARK: - Codex Done Frames (16x16)
+
+let codexDoneFrame1: [[P]] = sprite([
+    ".......RR.......",
+    "......RRRR......",
+    ".....NNNNNN.....",
+    "....NNCCCCNN....",
+    "...NNCCAACCNN...",
+    "..NNCA.EE.ACNN..",
+    "..NCC......CCN..",
+    "..NCC..EEE.CCN..",
+    "..NCGGGRRGGGCN..",
+    "..NCAAGRRGAACN..",
+    "...NAA....AAN...",
+    ".....a....a.....",
+    "......gggg......",
+    "................",
+    "................",
+    "................",
+])
+
+let codexDoneFrame2: [[P]] = sprite([
+    "............RR..",
+    ".......RR..RRRR.",
+    ".....NNNNNN.....",
+    "....NNCCCCNN....",
+    "...NNCCAACCNN...",
+    "..NNCA.EE.ACNN..",
+    "..NCC......CCN..",
+    "..NCC..EEE.CCN..",
+    "..NCGGGRRGGGCN..",
+    "..NCAAGRRGAACN..",
+    "...NAA....AAN...",
+    ".....a....a.....",
+    "......gggg......",
+    "................",
+    "................",
+    "................",
+])
+
+let codexDoneFrame3: [[P]] = sprite([
+    "...RR...........",
+    "..RRRR..........",
+    ".....NNNNNN.....",
+    "....NNCCCCNN....",
+    "...NNCCAACCNN...",
+    "..NNCA.EE.ACNN..",
+    "..NCC......CCN..",
+    "..NCC..EEE.CCN..",
+    "..NCGGGRRGGGCN..",
+    "..NCAAGRRGAACN..",
+    "...NAA....AAN...",
+    ".....a....a.....",
+    "......gggg......",
+    "................",
+    "................",
+    "................",
+])
+
 // MARK: - Sprite Renderer
 
 func renderSprite(_ sprite: [[P]], pixelSize: Int) -> NSImage {
@@ -250,28 +438,61 @@ func renderSprite(_ sprite: [[P]], pixelSize: Int) -> NSImage {
 
 // MARK: - Sprite Cache
 
+struct ToolSpriteCache {
+    let idle: [NSImage]
+    let work: [NSImage]
+    let done: [NSImage]
+}
+
 struct SpriteCache {
-    let idle1: NSImage
-    let idle2: NSImage
-    let idle3: NSImage
-    let work1: NSImage
-    let work2: NSImage
-    let work3: NSImage
-    let done1: NSImage
-    let done2: NSImage
-    let done3: NSImage
+    let claude: ToolSpriteCache
+    let codex: ToolSpriteCache
+
+    func frames(for tool: SessionTool, state: SessionState) -> [NSImage] {
+        let set = tool == .codex ? codex : claude
+        switch state {
+        case .idle: return set.idle
+        case .working: return set.work
+        case .done: return set.done
+        }
+    }
 
     static func create() -> SpriteCache {
         SpriteCache(
-            idle1: renderSprite(idleFrame1, pixelSize: 3),
-            idle2: renderSprite(idleFrame2, pixelSize: 3),
-            idle3: renderSprite(idleFrame3, pixelSize: 3),
-            work1: renderSprite(workFrame1, pixelSize: 3),
-            work2: renderSprite(workFrame2, pixelSize: 3),
-            work3: renderSprite(workFrame3, pixelSize: 3),
-            done1: renderSprite(doneFrame1, pixelSize: 3),
-            done2: renderSprite(doneFrame2, pixelSize: 3),
-            done3: renderSprite(doneFrame3, pixelSize: 3)
+            claude: ToolSpriteCache(
+                idle: [
+                    renderSprite(idleFrame1, pixelSize: 3),
+                    renderSprite(idleFrame2, pixelSize: 3),
+                    renderSprite(idleFrame3, pixelSize: 3),
+                ],
+                work: [
+                    renderSprite(workFrame1, pixelSize: 3),
+                    renderSprite(workFrame2, pixelSize: 3),
+                    renderSprite(workFrame3, pixelSize: 3),
+                ],
+                done: [
+                    renderSprite(doneFrame1, pixelSize: 3),
+                    renderSprite(doneFrame2, pixelSize: 3),
+                    renderSprite(doneFrame3, pixelSize: 3),
+                ]
+            ),
+            codex: ToolSpriteCache(
+                idle: [
+                    renderSprite(codexIdleFrame1, pixelSize: 3),
+                    renderSprite(codexIdleFrame2, pixelSize: 3),
+                    renderSprite(codexIdleFrame3, pixelSize: 3),
+                ],
+                work: [
+                    renderSprite(codexWorkFrame1, pixelSize: 3),
+                    renderSprite(codexWorkFrame2, pixelSize: 3),
+                    renderSprite(codexWorkFrame3, pixelSize: 3),
+                ],
+                done: [
+                    renderSprite(codexDoneFrame1, pixelSize: 3),
+                    renderSprite(codexDoneFrame2, pixelSize: 3),
+                    renderSprite(codexDoneFrame3, pixelSize: 3),
+                ]
+            )
         )
     }
 }
