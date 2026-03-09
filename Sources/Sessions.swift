@@ -587,7 +587,8 @@ class SessionDetector {
             seen.insert(pid)
 
             let descendantCpu = (tool == .codex) ? descendantCPU(for: pid, byParent: byParent) : 0.0
-            let smoothed = smoothedCPU(for: pid, cpu: process.cpu + descendantCpu)
+            let rawCpu = process.cpu + descendantCpu
+            let smoothed = smoothedCPU(for: pid, cpu: rawCpu)
             let cwdPath = cachedCwdPath(forPid: pid)
             let folder = cwdPath.map { ($0 as NSString).lastPathComponent }
             let hasUniqueClaudeCwd = tool == .claude
@@ -599,7 +600,7 @@ class SessionDetector {
                 hasUniqueClaudeCwd: hasUniqueClaudeCwd
             )
             let transcriptState = transcriptState(for: tool, conversation: convo)
-            let cpuState = cpuDrivenState(for: pid, tool: tool, smoothedCpu: smoothed)
+            let cpuState = cpuDrivenState(for: pid, tool: tool, rawCpu: rawCpu, smoothedCpu: smoothed)
             let state = transcriptState ?? cpuState
             let conversationKey = convo.id.map { "\(tool.rawValue):\($0)" }
             let title: String?
@@ -674,8 +675,9 @@ class SessionDetector {
 
                 let syntheticPid = syntheticRemotePid(localSSH: proxy.pid, remotePid: process.pid, tool: tool)
                 let descendantCpu = (tool == .codex) ? descendantCPU(for: process.pid, byParent: snapshot.byParent) : 0.0
-                let smoothed = smoothedCPU(for: syntheticPid, cpu: process.cpu + descendantCpu)
-                let state = cpuDrivenState(for: syntheticPid, tool: tool, smoothedCpu: smoothed)
+                let rawCpu = process.cpu + descendantCpu
+                let smoothed = smoothedCPU(for: syntheticPid, cpu: rawCpu)
+                let state = cpuDrivenState(for: syntheticPid, tool: tool, rawCpu: rawCpu, smoothedCpu: smoothed)
 
                 sessions.append(ClaudeSession(
                     pid: syntheticPid,
@@ -922,12 +924,17 @@ class SessionDetector {
         postWorkIdleTicks.removeValue(forKey: pid)
     }
 
-    private func cpuDrivenState(for pid: Int32, tool: SessionTool, smoothedCpu: Double) -> SessionState {
+    private func cpuDrivenState(for pid: Int32, tool: SessionTool, rawCpu: Double, smoothedCpu: Double) -> SessionState {
         let now = Date()
         let cpuThreshold = (tool == .codex) ? 1.25 : 8.0
         let requiredTicks = (tool == .codex) ? 1 : 2
+        let immediateCpuThreshold = (tool == .codex) ? 1.25 : 16.0
         let cpuHigh = smoothedCpu > cpuThreshold
-        if cpuHigh {
+        let immediateWorking = rawCpu > immediateCpuThreshold
+        if immediateWorking {
+            // Strong bursts should animate immediately; lighter noise still goes through hysteresis.
+            workingTickCount[pid] = requiredTicks
+        } else if cpuHigh {
             workingTickCount[pid] = (workingTickCount[pid] ?? 0) + 1
         } else {
             workingTickCount[pid] = 0
