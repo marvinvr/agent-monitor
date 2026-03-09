@@ -418,13 +418,13 @@ private struct TranscriptActivity {
            now.timeIntervalSince(lastToolActivityAt) <= Self.toolWorkingGrace {
             return .working
         }
-        if let lastActivityAt, now.timeIntervalSince(lastActivityAt) <= Self.workingGrace {
-            return .working
-        }
         if let lastAssistantMessageAt,
            (lastToolActivityAt == nil || lastAssistantMessageAt >= lastToolActivityAt!),
            now.timeIntervalSince(lastAssistantMessageAt) <= Self.idleDelay {
             return .done
+        }
+        if let lastActivityAt, now.timeIntervalSince(lastActivityAt) <= Self.workingGrace {
+            return .working
         }
         return .idle
     }

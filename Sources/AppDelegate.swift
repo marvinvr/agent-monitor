@@ -22,6 +22,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private let pad: CGFloat = 16
     private let titleH: CGFloat = 20
     private let maxCols = 6
+    private lazy var attentionSound: NSSound? = {
+        if let sound = NSSound(named: NSSound.Name("Glass")) {
+            return sound
+        }
+        return NSSound(contentsOfFile: "/System/Library/Sounds/Glass.aiff", byReference: true)
+    }()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -96,10 +102,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         pollQueue.async {
             let newSessions = self.detector.detectSessions()
             DispatchQueue.main.async {
-                let oldFP = self.sessions.map { "\($0.pid):\($0.state):\($0.tool):\($0.displayName):\($0.conversationMatchStatus.rawValue)" }.joined()
+                let oldSessions = self.sessions
+                let oldFP = oldSessions.map { "\($0.pid):\($0.state):\($0.tool):\($0.displayName):\($0.conversationMatchStatus.rawValue)" }.joined()
                 let newFP = newSessions.map { "\($0.pid):\($0.state):\($0.tool):\($0.displayName):\($0.conversationMatchStatus.rawValue)" }.joined()
                 let isInitialPoll = !self.hasCompletedInitialPoll
                 self.hasCompletedInitialPoll = true
+                self.playAttentionSoundIfNeeded(oldSessions: oldSessions, newSessions: newSessions, isInitialPoll: isInitialPoll)
                 self.sessions = newSessions
                 if isInitialPoll || oldFP != newFP { self.rebuildViews() }
                 let shouldPollAgain = self.pollRequestedWhileBusy
@@ -109,6 +117,27 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                     self.pollSessions()
                 }
             }
+        }
+    }
+
+    private func playAttentionSoundIfNeeded(
+        oldSessions: [ClaudeSession],
+        newSessions: [ClaudeSession],
+        isInitialPoll: Bool
+    ) {
+        guard !isInitialPoll else { return }
+
+        let oldStateByPid = Dictionary(uniqueKeysWithValues: oldSessions.map { ($0.pid, $0.state) })
+        let needsAttention = newSessions.contains { session in
+            session.state == .done && oldStateByPid[session.pid] != .done
+        }
+        guard needsAttention else { return }
+
+        if let attentionSound {
+            attentionSound.stop()
+            attentionSound.play()
+        } else {
+            NSSound.beep()
         }
     }
 
