@@ -199,7 +199,6 @@ extension AppDelegate {
 
     func candidateWindowPool(for session: ClaudeSession, windows: [AXUIElement]) -> [AXUIElement] {
         guard !session.isRemote else { return windows }
-        if session.tool == .terminal { return windows }
         let toolWindows = windows.filter { windowLikelyMatchesTool($0, tool: session.tool) }
         return toolWindows.isEmpty ? windows : toolWindows
     }
@@ -252,7 +251,7 @@ extension AppDelegate {
         case .claude:
             return !title.contains("codex")
         case .terminal:
-            return true
+            return !title.contains("codex") && !title.contains("claude")
         }
     }
 
@@ -280,7 +279,7 @@ extension AppDelegate {
         if session.isRemote {
             peerToolSessions = sessions.filter { $0.isRemote && $0.remoteHost == session.remoteHost }
         } else if session.tool == .terminal {
-            peerToolSessions = sessions.filter { !$0.isRemote }
+            peerToolSessions = sessions.filter { !$0.isRemote && $0.tool == .terminal }
         } else {
             peerToolSessions = sessions.filter { !$0.isRemote && $0.tool == session.tool }
         }

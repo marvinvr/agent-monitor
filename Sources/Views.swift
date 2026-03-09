@@ -71,7 +71,7 @@ class ClaudeSessionView: NSView {
                  from: .zero, operation: .sourceOver, fraction: 1.0)
 
         // Name label with tool badge
-        let name = session.displayName
+        let name = session.displayLabelText
         let color: NSColor
         if session.tool == .terminal {
             switch session.state {

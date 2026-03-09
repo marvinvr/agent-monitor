@@ -69,6 +69,11 @@ struct ClaudeSession: Hashable {
         return ClaudeNamer.name(for: namingKey)
     }
 
+    var displayLabelText: String {
+        let name = displayName
+        return name.count > 12 ? String(name.prefix(9)) + "..." : name
+    }
+
     var toolBadge: String {
         switch tool {
         case .claude: return "C"
