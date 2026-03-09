@@ -150,6 +150,7 @@ class SessionDetector {
     func detectGhosttyTerminalSessions(in snapshot: SystemSnapshot, existingSessions: [ClaudeSession]) -> [ClaudeSession] {
         ghosttyTerminalSessions(
             from: snapshot.processes,
+            byParent: snapshot.byParent,
             excludingTTYs: Set(existingSessions.map { $0.tty })
         )
     }

@@ -12,6 +12,7 @@ private let terminalIdleFrame1: [[P]] = sprite([
     "................",
     "................",
     "................",
+    "................",
     "....Q...........",
     ".....Q..........",
     "......Q.........",
@@ -19,7 +20,6 @@ private let terminalIdleFrame1: [[P]] = sprite([
     "......Q.........",
     ".....Q..........",
     "....Q...UUUU....",
-    "................",
 ])
 
 private let terminalIdleFrame2: [[P]] = sprite([
@@ -34,6 +34,7 @@ private let terminalIdleFrame2: [[P]] = sprite([
     "................",
     "................",
     "................",
+    "................",
     "....Q...........",
     ".....Q..........",
     "......Q.........",
@@ -41,7 +42,6 @@ private let terminalIdleFrame2: [[P]] = sprite([
     "......Q.........",
     ".....Q..........",
     "....Q...UUUU....",
-    "................",
 ])
 
 private let terminalIdleFrame3: [[P]] = sprite([
@@ -56,6 +56,7 @@ private let terminalIdleFrame3: [[P]] = sprite([
     "................",
     "................",
     "................",
+    "................",
     "....Q...........",
     ".....Q..........",
     "......Q.........",
@@ -63,7 +64,6 @@ private let terminalIdleFrame3: [[P]] = sprite([
     "......Q.........",
     ".....Q..........",
     "....Q...UUUU....",
-    "................",
 ])
 
 private let terminalWorkFrame1: [[P]] = sprite([
@@ -78,6 +78,7 @@ private let terminalWorkFrame1: [[P]] = sprite([
     "................",
     "................",
     "................",
+    "................",
     "....Q...........",
     ".....Q..........",
     "......Q.........",
@@ -85,7 +86,6 @@ private let terminalWorkFrame1: [[P]] = sprite([
     "......Q.........",
     ".....Q..........",
     "....Q...UUUU....",
-    "................",
 ])
 
 private let terminalWorkFrame2: [[P]] = sprite([
@@ -100,6 +100,7 @@ private let terminalWorkFrame2: [[P]] = sprite([
     "................",
     "................",
     "................",
+    "................",
     "....Q...........",
     ".....Q..........",
     "......Q.........",
@@ -107,7 +108,6 @@ private let terminalWorkFrame2: [[P]] = sprite([
     "......Q.........",
     ".....Q..........",
     "....Q...UUUU....",
-    "................",
 ])
 
 private let terminalWorkFrame3: [[P]] = sprite([
@@ -122,6 +122,7 @@ private let terminalWorkFrame3: [[P]] = sprite([
     "................",
     "................",
     "................",
+    "................",
     "....Q...........",
     ".....Q..........",
     "......Q.........",
@@ -129,7 +130,6 @@ private let terminalWorkFrame3: [[P]] = sprite([
     "......Q.........",
     ".....Q..........",
     "....Q...UUUU....",
-    "................",
 ])
 
 let terminalSpriteSpec = ToolSpriteSpec(

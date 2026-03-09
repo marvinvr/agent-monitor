@@ -110,6 +110,7 @@ func remoteAgentSessions(from localProcesses: [ProcessSnapshot]) -> [ClaudeSessi
 
 func ghosttyTerminalSessions(
     from processes: [ProcessSnapshot],
+    byParent: [Int32: [ProcessSnapshot]],
     excludingTTYs: Set<String>
 ) -> [ClaudeSession] {
     let loginTTYs = ghosttyLoginTTYs(from: processes)
@@ -122,7 +123,8 @@ func ghosttyTerminalSessions(
 
     struct DraftTerminalSession {
         let tty: String
-        let representative: ProcessSnapshot?
+        let anchor: ProcessSnapshot?
+        let foreground: ProcessSnapshot?
         let sshDestination: SSHDestination?
         let cwdPath: String?
         let folderName: String?
@@ -133,23 +135,29 @@ func ghosttyTerminalSessions(
     var drafts: [DraftTerminalSession] = []
     for tty in loginTTYs where !excludingTTYs.contains(tty) {
         let ttyProcesses = processes.filter { $0.tty == tty }
-        let representative = representativeGhosttyProcess(forTTY: tty, processes: ttyProcesses)
+        let anchor = terminalAnchorProcess(forTTY: tty, processes: ttyProcesses, byParent: byParent)
+        let foreground = terminalForegroundProcess(forTTY: tty, processes: ttyProcesses)
         let sshDestination = sshProxyByTTY[tty]
-        let cwdPath = sshDestination == nil ? representative.flatMap { cachedCwdPath(forPid: $0.pid) } : nil
+        let cwdPath = sshDestination == nil ? anchor.flatMap { cachedCwdPath(forPid: $0.pid) } : nil
         let folderName = cwdPath.map { ($0 as NSString).lastPathComponent }
         let baseTitle = terminalTitle(
             cwdPath: cwdPath,
-            representative: representative,
+            representative: foreground ?? anchor,
             sshDestination: sshDestination
         )
         drafts.append(DraftTerminalSession(
             tty: tty,
-            representative: representative,
+            anchor: anchor,
+            foreground: foreground,
             sshDestination: sshDestination,
             cwdPath: cwdPath,
             folderName: folderName,
             baseTitle: baseTitle,
-            rawCpu: ttyProcesses.reduce(0.0) { $0 + $1.cpu }
+            rawCpu: terminalActivityCPU(
+                ttyProcesses: ttyProcesses,
+                representative: anchor,
+                byParent: byParent
+            )
         ))
     }
 
@@ -183,7 +191,7 @@ func ghosttyTerminalSessions(
             tty: draft.tty,
             tool: .terminal,
             isInteractive: true,
-            commandArgs: draft.representative?.command ?? "",
+            commandArgs: draft.foreground?.command ?? draft.anchor?.command ?? "",
             smoothedCpu: smoothed,
             state: state,
             cwdPath: draft.cwdPath,
@@ -316,6 +324,80 @@ func representativeGhosttyProcess(forTTY tty: String, processes: [ProcessSnapsho
     return (filtered.isEmpty ? processes : filtered).max { lhs, rhs in lhs.pid < rhs.pid }
 }
 
+func terminalAnchorProcess(
+    forTTY tty: String,
+    processes: [ProcessSnapshot],
+    byParent: [Int32: [ProcessSnapshot]]
+) -> ProcessSnapshot? {
+    let loginProcess = processes.first { $0.binaryName == "login" }
+    let shellNames: Set<String> = ["zsh", "-zsh", "bash", "-bash", "sh", "-sh", "fish", "-fish", "tmux", "screen", "ssh"]
+
+    if let loginProcess {
+        let directChildren = (byParent[loginProcess.pid] ?? [])
+            .filter { $0.tty == tty && $0.binaryName != "ghostty" && $0.binaryName != "login" }
+
+        if let stableChild = directChildren
+            .filter({ shellNames.contains($0.binaryName) })
+            .min(by: { $0.pid < $1.pid }) {
+            return stableChild
+        }
+
+        if let oldestChild = directChildren.min(by: { $0.pid < $1.pid }) {
+            return oldestChild
+        }
+    }
+
+    let stableTTYProcess = processes
+        .filter { shellNames.contains($0.binaryName) }
+        .min(by: { $0.pid < $1.pid })
+    if let stableTTYProcess {
+        return stableTTYProcess
+    }
+
+    return representativeGhosttyProcess(forTTY: tty, processes: processes)
+}
+
+func terminalForegroundProcess(
+    forTTY tty: String,
+    processes: [ProcessSnapshot]
+) -> ProcessSnapshot? {
+    let shellNames: Set<String> = ["zsh", "-zsh", "bash", "-bash", "sh", "-sh", "fish", "-fish", "tmux", "screen", "ssh", "login"]
+    let immediateNames: Set<String> = ["htop", "top", "vim", "nvim", "less", "more", "man", "watch"]
+
+    let candidates = processes.filter { process in
+        process.tty == tty &&
+        process.binaryName != "ghostty" &&
+        !shellNames.contains(process.binaryName)
+    }
+
+    let meaningful = candidates.filter { process in
+        !isEphemeralTerminalProbe(process.binaryName) &&
+        (immediateNames.contains(process.binaryName) || process.elapsedSeconds >= 2 || process.cpu >= 0.5)
+    }
+
+    if let foreground = meaningful.max(by: { lhs, rhs in
+        if lhs.elapsedSeconds != rhs.elapsedSeconds { return lhs.elapsedSeconds < rhs.elapsedSeconds }
+        return lhs.pid < rhs.pid
+    }) {
+        return foreground
+    }
+
+    return nil
+}
+
+func terminalActivityCPU(
+    ttyProcesses: [ProcessSnapshot],
+    representative: ProcessSnapshot?,
+    byParent: [Int32: [ProcessSnapshot]]
+) -> Double {
+    let directTTYCpu = ttyProcesses.reduce(0.0) { $0 + $1.cpu }
+    let root = ttyProcesses.first(where: { $0.binaryName == "login" }) ?? representative
+    guard let root else { return directTTYCpu }
+
+    let treeCpu = root.cpu + descendantCPU(for: root.pid, byParent: byParent)
+    return max(directTTYCpu, treeCpu)
+}
+
 func terminalTitle(
     cwdPath: String?,
     representative: ProcessSnapshot?,
@@ -324,16 +406,23 @@ func terminalTitle(
     if let sshDestination {
         return sshDestination.displayName
     }
-    if let representative {
-        let shellNames: Set<String> = ["zsh", "-zsh", "bash", "-bash", "sh", "-sh", "fish", "-fish", "tmux", "screen"]
-        if !shellNames.contains(representative.binaryName) {
-            return representative.binaryName
-        }
+    if let representative,
+       representative.binaryName != "login" &&
+       representative.binaryName != "ghostty" {
+        return representative.binaryName
     }
     if cwdPath != nil {
         return "terminal"
     }
     return "terminal"
+}
+
+func isEphemeralTerminalProbe(_ binaryName: String) -> Bool {
+    let ignored: Set<String> = [
+        "ps", "lsof", "sed", "awk", "grep", "rg", "cat", "head", "tail",
+        "cut", "wc", "xargs", "tr", "sort", "uniq", "tee", "basename", "dirname"
+    ]
+    return ignored.contains(binaryName)
 }
 
 func sshDestination(from command: String) -> SSHDestination? {
