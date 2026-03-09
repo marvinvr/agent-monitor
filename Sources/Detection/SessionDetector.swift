@@ -61,6 +61,11 @@ class SessionDetector {
         let snapshot: RemoteHostSnapshot?
     }
 
+    struct CachedValue<T> {
+        let fetchedAt: Date
+        let value: T?
+    }
+
     var cpuHistory: [Int32: [Double]] = [:]
     var lastCpuActivityAt: [Int32: Date] = [:]
     var wasWorking: Set<Int32> = []
@@ -78,11 +83,20 @@ class SessionDetector {
     var claudeSessionPathById: [String: String] = [:]
     var claudeIndexCacheByProjectPath: [String: [ClaudeIndexEntry]] = [:]
     var claudeIndexMtimeByProjectPath: [String: Date] = [:]
+    var claudeProjectEntriesCacheByRoot: [String: CachedValue<[ClaudeIndexEntry]>] = [:]
     var transcriptActivityCacheByPath: [String: CachedTranscriptActivity] = [:]
     var cwdPathCacheByPid: [Int32: CachedPathLookup] = [:]
+    var processStartDateCacheByPid: [Int32: CachedValue<Date>] = [:]
+    var claudeExactSessionIdCacheByPid: [Int32: CachedValue<String>] = [:]
+    var claudeHistorySessionIdCacheByPid: [Int32: CachedValue<String>] = [:]
     var remoteSnapshotCache: [SSHDestination: CachedRemoteSnapshot] = [:]
-    let remoteSnapshotTTL: TimeInterval = 4
-    let cwdCacheTTL: TimeInterval = 3
+    let remoteSnapshotTTL: TimeInterval = 8
+    let cwdFoundCacheTTL: TimeInterval = 20
+    let cwdMissingCacheTTL: TimeInterval = 4
+    let processStartDateCacheTTL: TimeInterval = 60
+    let claudeExactSessionLookupTTL: TimeInterval = 6
+    let claudeHistoryLookupTTL: TimeInterval = 12
+    let claudeProjectEntriesCacheTTL: TimeInterval = 15
     let agentStartupIdleGrace = 4
 
     func detectSessions() -> [ClaudeSession] {
@@ -108,6 +122,9 @@ class SessionDetector {
         codexSessionPathByPid = codexSessionPathByPid.filter { alive.contains($0.key) }
         claudeSessionIdByPid = claudeSessionIdByPid.filter { alive.contains($0.key) }
         cwdPathCacheByPid = cwdPathCacheByPid.filter { alive.contains($0.key) }
+        processStartDateCacheByPid = processStartDateCacheByPid.filter { alive.contains($0.key) }
+        claudeExactSessionIdCacheByPid = claudeExactSessionIdCacheByPid.filter { alive.contains($0.key) }
+        claudeHistorySessionIdCacheByPid = claudeHistorySessionIdCacheByPid.filter { alive.contains($0.key) }
         let activeDestinations = Set(remoteSSHProxySessions(from: snapshot.processes).map { $0.destination })
         remoteSnapshotCache = remoteSnapshotCache.filter { activeDestinations.contains($0.key) }
 
@@ -120,9 +137,18 @@ class SessionDetector {
         ClaudeNamer.prune(activeKeys: activeNamingKeys)
 
         sessions.sort { lhs, rhs in
-            if lhs.tty != rhs.tty { return lhs.tty < rhs.tty }
+            if lhs.directorySortKey != rhs.directorySortKey {
+                return lhs.directorySortKey.localizedStandardCompare(rhs.directorySortKey) == .orderedAscending
+            }
+            if lhs.pathSortKey != rhs.pathSortKey {
+                return lhs.pathSortKey.localizedStandardCompare(rhs.pathSortKey) == .orderedAscending
+            }
+            if lhs.tool.sortRank != rhs.tool.sortRank { return lhs.tool.sortRank < rhs.tool.sortRank }
             if lhs.isRemote != rhs.isRemote { return !lhs.isRemote }
-            if lhs.tool != rhs.tool { return lhs.tool.rawValue < rhs.tool.rawValue }
+            if lhs.displayName != rhs.displayName {
+                return lhs.displayName.localizedStandardCompare(rhs.displayName) == .orderedAscending
+            }
+            if lhs.tty != rhs.tty { return lhs.tty < rhs.tty }
             return lhs.pid < rhs.pid
         }
         return sessions

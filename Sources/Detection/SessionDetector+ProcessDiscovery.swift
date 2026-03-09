@@ -115,6 +115,7 @@ func ghosttyTerminalSessions(
 ) -> [ClaudeSession] {
     let loginTTYs = ghosttyLoginTTYs(from: processes)
     guard !loginTTYs.isEmpty else { return [] }
+    let processesByTTY = Dictionary(grouping: processes, by: \.tty)
 
     let sshProxyByTTY = Dictionary(
         remoteSSHProxySessions(from: processes).map { ($0.tty, $0.destination) },
@@ -134,7 +135,7 @@ func ghosttyTerminalSessions(
 
     var drafts: [DraftTerminalSession] = []
     for tty in loginTTYs where !excludingTTYs.contains(tty) {
-        let ttyProcesses = processes.filter { $0.tty == tty }
+        let ttyProcesses = processesByTTY[tty] ?? []
         let anchor = terminalAnchorProcess(forTTY: tty, processes: ttyProcesses, byParent: byParent)
         let foreground = terminalForegroundProcess(forTTY: tty, processes: ttyProcesses)
         let sshDestination = sshProxyByTTY[tty]
@@ -215,12 +216,13 @@ func synthesizeRemoteSessions(
     let sortedProxies = proxies.sorted { $0.pid < $1.pid }
     let orderedTTYs = remoteTTYOrder(from: snapshot.processes)
     guard !sortedProxies.isEmpty, !orderedTTYs.isEmpty else { return [] }
+    let processesByTTY = Dictionary(grouping: snapshot.processes, by: \.tty)
 
     var sessions: [ClaudeSession] = []
     // We cannot identify the exact existing remote PTY for a given local ssh client
     // without cooperation from that shell, so we pair by connection creation order.
     for (proxy, remoteTTY) in zip(sortedProxies, orderedTTYs) {
-        let ttyProcesses = snapshot.processes.filter { $0.tty == remoteTTY }
+        let ttyProcesses = processesByTTY[remoteTTY] ?? []
         for process in ttyProcesses {
             guard let tool = tool(for: process),
                   isInteractiveTTY(process.tty)

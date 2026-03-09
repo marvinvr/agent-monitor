@@ -16,6 +16,8 @@ class ClaudeSessionView: NSView {
     private var trackingArea: NSTrackingArea?
     private var hovered = false
     var onClick: ((ClaudeSession) -> Void)?
+    var needsAnimation: Bool { session.shouldAnimate }
+    private var lastAnimationSignature: Int?
 
     init(session: ClaudeSession, frame: NSRect, sprites: SpriteCache) {
         self.session = session
@@ -36,6 +38,37 @@ class ClaudeSessionView: NSView {
     override func mouseExited(with event: NSEvent) { hovered = false; needsDisplay = true }
     override func mouseDown(with event: NSEvent) { onClick?(session) }
     override var isFlipped: Bool { false }
+
+    @discardableResult
+    func updateAnimationFrame(_ frame: Int) -> Bool {
+        guard needsAnimation else { return false }
+        let signature = animationSignature(for: frame)
+        guard signature != lastAnimationSignature else { return false }
+        lastAnimationSignature = signature
+        animFrame = frame
+        needsDisplay = true
+        return true
+    }
+
+    private func animationSignature(for frame: Int) -> Int {
+        let spriteFrames = sprites.frames(for: session.tool, state: session.state).count
+        let spriteFrameIndex: Int
+        let dots: Int
+
+        switch session.state {
+        case .working:
+            spriteFrameIndex = frame % spriteFrames
+            dots = session.tool == .terminal ? 0 : (frame % 3) + 1
+        case .done:
+            spriteFrameIndex = (frame / 4) % spriteFrames
+            dots = 0
+        case .idle:
+            spriteFrameIndex = (frame / 6) % spriteFrames
+            dots = 0
+        }
+
+        return spriteFrameIndex << 8 | dots
+    }
 
     override func draw(_ dirtyRect: NSRect) {
         let tileBounds = bounds.insetBy(dx: 4, dy: 3)

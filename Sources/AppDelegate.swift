@@ -1,6 +1,11 @@
 import AppKit
 
 class AppDelegate: NSObject, NSApplicationDelegate {
+    private struct AnimationSchedule: Equatable {
+        let interval: TimeInterval
+        let frameStep: Int
+    }
+
     var panel: MonitorPanel!
     var detector = SessionDetector()
     var sessions: [ClaudeSession] = []
@@ -12,10 +17,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var sprites: SpriteCache!
     var loadingView: LoadingPlaceholderView?
     private let pollQueue = DispatchQueue(label: "com.mvr.agent-monitor.poll", qos: .utility)
-    private let pollInterval: TimeInterval = 1.0
+    private let visiblePollInterval: TimeInterval = 2.0
+    private let backgroundPollInterval: TimeInterval = 4.0
+    private let baseAnimationInterval: TimeInterval = 0.33
     private var isPolling = false
     private var pollRequestedWhileBusy = false
     private var hasCompletedInitialPoll = false
+    private var pollTimer: Timer?
+    private var animationTimer: Timer?
+    private var animationFrameStep = 1
     private let stayAliveReason = "Agent Monitor should remain running in the background"
     private let cellW: CGFloat = 86
     private let cellH: CGFloat = 104
@@ -48,20 +58,24 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         rebuildViews()
         panel.orderFront(nil)
         setupMenuBar()
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(applicationOcclusionStateDidChange),
+            name: NSApplication.didChangeOcclusionStateNotification,
+            object: NSApp
+        )
 
-        Timer.scheduledTimer(withTimeInterval: pollInterval, repeats: true) { [weak self] _ in
-            self?.pollSessions()
-        }
-        Timer.scheduledTimer(withTimeInterval: 0.33, repeats: true) { [weak self] _ in
-            self?.frame += 1
-            self?.animate()
-        }
+        refreshPollTimer()
+        refreshAnimationTimer()
         pollSessions()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
         ProcessInfo.processInfo.enableAutomaticTermination(stayAliveReason)
         ProcessInfo.processInfo.enableSuddenTermination()
+        NotificationCenter.default.removeObserver(self)
+        pollTimer?.invalidate()
+        animationTimer?.invalidate()
     }
 
     func setupMenuBar() {
@@ -90,7 +104,104 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
 
-    @objc func showPanel() { panel.orderFront(nil) }
+    @objc func showPanel() {
+        panel.orderFront(nil)
+        refreshPollTimer()
+        refreshAnimationTimer()
+    }
+
+    @objc private func applicationOcclusionStateDidChange() {
+        refreshPollTimer()
+        refreshAnimationTimer()
+    }
+
+    private func monitorIsVisibleForUpdates() -> Bool {
+        panel?.isVisible == true && NSApp.occlusionState.contains(.visible)
+    }
+
+    private func currentPollInterval() -> TimeInterval {
+        monitorIsVisibleForUpdates() ? visiblePollInterval : backgroundPollInterval
+    }
+
+    private func refreshPollTimer() {
+        let interval = currentPollInterval()
+        if let existing = pollTimer,
+           existing.timeInterval == interval,
+           existing.isValid {
+            return
+        }
+        pollTimer?.invalidate()
+        let timer = Timer(timeInterval: interval, repeats: true) { [weak self] _ in
+            self?.pollSessions()
+        }
+        timer.tolerance = interval * 0.25
+        RunLoop.main.add(timer, forMode: .common)
+        pollTimer = timer
+    }
+
+    private func refreshAnimationTimer() {
+        guard let schedule = currentAnimationSchedule() else {
+            animationTimer?.invalidate()
+            animationTimer = nil
+            return
+        }
+
+        if let existing = animationTimer,
+           existing.timeInterval == schedule.interval,
+           existing.isValid,
+           animationFrameStep == schedule.frameStep {
+            return
+        }
+
+        animationTimer?.invalidate()
+        animationFrameStep = schedule.frameStep
+        let timer = Timer(timeInterval: schedule.interval, repeats: true) { [weak self] _ in
+            guard let self else { return }
+            self.frame += self.animationFrameStep
+            self.animate()
+        }
+        timer.tolerance = schedule.interval * 0.35
+        RunLoop.main.add(timer, forMode: .common)
+        animationTimer = timer
+    }
+
+    private func currentAnimationSchedule() -> AnimationSchedule? {
+        guard monitorIsVisibleForUpdates() else { return nil }
+
+        if loadingView != nil {
+            return AnimationSchedule(interval: baseAnimationInterval, frameStep: 1)
+        }
+
+        let frameSteps = views.compactMap { view -> Int? in
+            guard view.needsAnimation else { return nil }
+            switch view.session.state {
+            case .working:
+                return 1
+            case .done:
+                return 4
+            case .idle:
+                return 6
+            }
+        }
+        guard let first = frameSteps.first else { return nil }
+
+        let step = frameSteps.dropFirst().reduce(first) { gcd($0, $1) }
+        return AnimationSchedule(
+            interval: baseAnimationInterval * Double(step),
+            frameStep: step
+        )
+    }
+
+    private func gcd(_ lhs: Int, _ rhs: Int) -> Int {
+        var a = lhs
+        var b = rhs
+        while b != 0 {
+            let remainder = a % b
+            a = b
+            b = remainder
+        }
+        return max(a, 1)
+    }
 
     func pollSessions() {
         guard !isPolling else {
@@ -110,6 +221,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 self.playAttentionSoundIfNeeded(oldSessions: oldSessions, newSessions: newSessions, isInitialPoll: isInitialPoll)
                 self.sessions = newSessions
                 if isInitialPoll || oldFP != newFP { self.rebuildViews() }
+                self.refreshPollTimer()
+                self.refreshAnimationTimer()
                 let shouldPollAgain = self.pollRequestedWhileBusy
                 self.pollRequestedWhileBusy = false
                 self.isPolling = false
@@ -222,8 +335,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     func animate() {
         for v in views {
-            v.animFrame = frame
-            v.needsDisplay = true
+            _ = v.updateAnimationFrame(frame)
         }
         loadingView?.animFrame = frame
         loadingView?.needsDisplay = true

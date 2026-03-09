@@ -54,12 +54,6 @@ func claudeConversationMeta(
     cwdPath: String?,
     hasUniqueClaudeCwd: Bool
 ) -> ConversationMeta {
-    let discoveredExactSessionId = claudeSessionId(forPid: pid)
-        ?? claudeHistorySessionId(
-            forPid: pid,
-            cwdPath: cwdPath,
-            hasUniqueClaudeCwd: hasUniqueClaudeCwd
-        )
     let cachedSessionId = claudeSessionIdByPid[pid]
     let cachedVerifiedSessionId = cachedSessionId.flatMap {
         claudeMetaBySessionId[$0]?.matchStatus == .verified ? $0 : nil
@@ -67,7 +61,18 @@ func claudeConversationMeta(
     let cachedGuessedSessionId = cachedSessionId.flatMap {
         claudeMetaBySessionId[$0]?.matchStatus == .guessed ? $0 : nil
     }
-    let exactSessionId = discoveredExactSessionId ?? cachedVerifiedSessionId
+    let discoveredExactSessionId: String?
+    if let cachedVerifiedSessionId {
+        discoveredExactSessionId = cachedVerifiedSessionId
+    } else {
+        discoveredExactSessionId = cachedClaudeSessionId(forPid: pid)
+            ?? cachedClaudeHistorySessionId(
+                forPid: pid,
+                cwdPath: cwdPath,
+                hasUniqueClaudeCwd: hasUniqueClaudeCwd
+            )
+    }
+    let exactSessionId = discoveredExactSessionId
     let fallbackSessionId = exactSessionId == nil
         ? (cachedGuessedSessionId ?? claudeFallbackSessionId(forPid: pid, cwdPath: cwdPath))
         : nil
@@ -100,6 +105,40 @@ func claudeConversationMeta(
     let parsed = parseClaudeSessionMeta(path: sessionPath, sessionId: sid, matchStatus: matchStatus)
     claudeMetaBySessionId[sid] = parsed
     return parsed
+}
+
+func cachedClaudeSessionId(forPid pid: Int32) -> String? {
+    let now = Date()
+    if let cached = claudeExactSessionIdCacheByPid[pid],
+       now.timeIntervalSince(cached.fetchedAt) < claudeExactSessionLookupTTL {
+        return cached.value
+    }
+    let value = claudeSessionId(forPid: pid)
+    claudeExactSessionIdCacheByPid[pid] = CachedValue(fetchedAt: now, value: value)
+    return value
+}
+
+func cachedClaudeHistorySessionId(
+    forPid pid: Int32,
+    cwdPath: String?,
+    hasUniqueClaudeCwd: Bool
+) -> String? {
+    guard hasUniqueClaudeCwd, cwdPath != nil else {
+        claudeHistorySessionIdCacheByPid.removeValue(forKey: pid)
+        return nil
+    }
+    let now = Date()
+    if let cached = claudeHistorySessionIdCacheByPid[pid],
+       now.timeIntervalSince(cached.fetchedAt) < claudeHistoryLookupTTL {
+        return cached.value
+    }
+    let value = claudeHistorySessionId(
+        forPid: pid,
+        cwdPath: cwdPath,
+        hasUniqueClaudeCwd: hasUniqueClaudeCwd
+    )
+    claudeHistorySessionIdCacheByPid[pid] = CachedValue(fetchedAt: now, value: value)
+    return value
 }
 
 func codexSessionPath(forPid pid: Int32) -> String? {
@@ -299,15 +338,21 @@ func claudeProjectSessionEntries(forCwd cwdPath: String) -> [ClaudeIndexEntry] {
         .appendingPathComponent(".claude/projects/\(slug)")
     let rootURL = URL(fileURLWithPath: projectRoot, isDirectory: true)
     let fm = FileManager.default
+    let now = Date()
+    if let cached = claudeProjectEntriesCacheByRoot[projectRoot],
+       now.timeIntervalSince(cached.fetchedAt) < claudeProjectEntriesCacheTTL {
+        return cached.value ?? []
+    }
     guard let urls = try? fm.contentsOfDirectory(
         at: rootURL,
         includingPropertiesForKeys: [.contentModificationDateKey],
         options: [.skipsHiddenFiles]
     ) else {
+        claudeProjectEntriesCacheByRoot[projectRoot] = CachedValue(fetchedAt: now, value: [])
         return []
     }
 
-    return urls.compactMap { url -> ClaudeIndexEntry? in
+    let entries = urls.compactMap { url -> ClaudeIndexEntry? in
         guard url.pathExtension == "jsonl" else { return nil }
         let modified = (try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
         return ClaudeIndexEntry(
@@ -317,6 +362,8 @@ func claudeProjectSessionEntries(forCwd cwdPath: String) -> [ClaudeIndexEntry] {
         )
     }
     .sorted { $0.modified > $1.modified }
+    claudeProjectEntriesCacheByRoot[projectRoot] = CachedValue(fetchedAt: now, value: entries)
+    return entries
 }
 
 func parseCodexSessionMeta(path: String) -> ConversationMeta {

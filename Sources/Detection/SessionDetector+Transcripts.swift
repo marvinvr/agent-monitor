@@ -260,25 +260,37 @@ static func readAllLines(path: String) -> [String]? {
 }
 
 func processStartDate(forPid pid: Int32) -> Date? {
+    let now = Date()
+    if let cached = processStartDateCacheByPid[pid],
+       now.timeIntervalSince(cached.fetchedAt) < processStartDateCacheTTL {
+        return cached.value
+    }
+
     guard let output = runProcess(path: "/bin/ps", arguments: ["-p", "\(pid)", "-o", "lstart="]) else {
+        processStartDateCacheByPid[pid] = CachedValue(fetchedAt: now, value: nil)
         return nil
     }
     let normalized = output
         .split(whereSeparator: { $0.isWhitespace })
         .joined(separator: " ")
-    guard !normalized.isEmpty else { return nil }
+    guard !normalized.isEmpty else {
+        processStartDateCacheByPid[pid] = CachedValue(fetchedAt: now, value: nil)
+        return nil
+    }
 
     let formatter = DateFormatter()
     formatter.locale = Locale(identifier: "en_US_POSIX")
     formatter.timeZone = .current
     formatter.dateFormat = "EEE MMM d HH:mm:ss yyyy"
-    return formatter.date(from: normalized)
+    let parsed = formatter.date(from: normalized)
+    processStartDateCacheByPid[pid] = CachedValue(fetchedAt: now, value: parsed)
+    return parsed
 }
 
 func cachedCwdPath(forPid pid: Int32) -> String? {
     let now = Date()
     if let cached = cwdPathCacheByPid[pid],
-       now.timeIntervalSince(cached.fetchedAt) < cwdCacheTTL {
+       now.timeIntervalSince(cached.fetchedAt) < (cached.path == nil ? cwdMissingCacheTTL : cwdFoundCacheTTL) {
         return cached.path
     }
     let path = Self.cwdPath(forPid: pid)

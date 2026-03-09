@@ -6,6 +6,26 @@ enum SessionTool: String {
     case claude
     case codex
     case terminal
+
+    var sortRank: Int {
+        switch self {
+        case .claude:
+            return 0
+        case .codex:
+            return 1
+        case .terminal:
+            return 2
+        }
+    }
+
+    var supportsAnimation: Bool {
+        switch self {
+        case .claude, .codex:
+            return true
+        case .terminal:
+            return false
+        }
+    }
 }
 
 // MARK: - Session State
@@ -58,6 +78,33 @@ struct ClaudeSession: Hashable {
     let remoteTTY: String?
 
     var isRemote: Bool { remoteHost != nil }
+    var shouldAnimate: Bool { tool.supportsAnimation }
+
+    var directorySortKey: String {
+        if let folderName = normalizedSortComponent(folderName) {
+            return folderName
+        }
+        if let cwdPath {
+            let lastComponent = (cwdPath as NSString).lastPathComponent
+            if let normalized = normalizedSortComponent(lastComponent) {
+                return normalized
+            }
+        }
+        if let remoteHost = normalizedSortComponent(remoteHost) {
+            return remoteHost
+        }
+        return "~"
+    }
+
+    var pathSortKey: String {
+        if let cwdPath = normalizedSortComponent(cwdPath) {
+            return cwdPath
+        }
+        if let remoteHost = normalizedSortComponent(remoteHost) {
+            return remoteHost
+        }
+        return tty.lowercased()
+    }
 
     private var namingKey: String {
         if let remoteHost {
@@ -155,6 +202,13 @@ struct ClaudeSession: Hashable {
         guard text.count > maxVisible else { return text }
         let prefixCount = maxVisible - truncatedSuffix.count
         return String(text.prefix(prefixCount)) + truncatedSuffix
+    }
+
+    private func normalizedSortComponent(_ value: String?) -> String? {
+        guard let value else { return nil }
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        return trimmed.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
     }
 }
 
