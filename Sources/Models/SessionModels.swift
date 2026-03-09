@@ -39,6 +39,8 @@ enum ConversationMatchStatus: String {
 // MARK: - Claude Session
 
 struct ClaudeSession: Hashable {
+    static let remoteTerminalSubtitlePlaceholder = "remote"
+
     let pid: Int32
     let tty: String
     let tool: SessionTool
@@ -71,7 +73,7 @@ struct ClaudeSession: Hashable {
 
     var displayLabelText: String {
         let name = displayName
-        return name.count > 12 ? String(name.prefix(9)) + "..." : name
+        return name.count > 10 ? String(name.prefix(7)) + "..." : name
     }
 
     var toolBadge: String {
@@ -94,10 +96,13 @@ struct ClaudeSession: Hashable {
             return folder.count > 10 ? String(folder.prefix(7)) + "..." : folder
         }
         if let remoteHost {
-            guard !contextLabelMatchesDisplayName(remoteHost) else { return nil }
-            return remoteHost.count > 10 ? String(remoteHost.prefix(7)) + "..." : remoteHost
+            if !contextLabelMatchesDisplayName(remoteHost) {
+                return remoteHost.count > 10 ? String(remoteHost.prefix(7)) + "..." : remoteHost
+            }
         }
-        if tool == .terminal { return "-" }
+        if tool == .terminal {
+            return isRemote ? Self.remoteTerminalSubtitlePlaceholder : "-"
+        }
         return nil
     }
 
@@ -189,4 +194,3 @@ enum ClaudeNamer {
         }
     }
 }
-
