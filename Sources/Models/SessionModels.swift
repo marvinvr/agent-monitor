@@ -40,6 +40,7 @@ enum ConversationMatchStatus: String {
 
 struct ClaudeSession: Hashable {
     static let remoteTerminalSubtitlePlaceholder = "remote"
+    private static let truncatedSuffix = ".."
 
     let pid: Int32
     let tty: String
@@ -73,7 +74,7 @@ struct ClaudeSession: Hashable {
 
     var displayLabelText: String {
         let name = displayName
-        return name.count > 10 ? String(name.prefix(7)) + "..." : name
+        return Self.truncatedLabel(name)
     }
 
     var toolBadge: String {
@@ -93,11 +94,11 @@ struct ClaudeSession: Hashable {
     var subtitleText: String? {
         if let folder = folderName {
             guard !contextLabelMatchesDisplayName(folder) else { return nil }
-            return folder.count > 10 ? String(folder.prefix(7)) + "..." : folder
+            return Self.truncatedLabel(folder)
         }
         if let remoteHost {
             if !contextLabelMatchesDisplayName(remoteHost) {
-                return remoteHost.count > 10 ? String(remoteHost.prefix(7)) + "..." : remoteHost
+                return Self.truncatedLabel(remoteHost)
             }
         }
         if tool == .terminal {
@@ -149,6 +150,12 @@ struct ClaudeSession: Hashable {
 
     func hash(into hasher: inout Hasher) { hasher.combine(pid) }
     static func == (lhs: ClaudeSession, rhs: ClaudeSession) -> Bool { lhs.pid == rhs.pid }
+
+    private static func truncatedLabel(_ text: String, maxVisible: Int = 10) -> String {
+        guard text.count > maxVisible else { return text }
+        let prefixCount = maxVisible - truncatedSuffix.count
+        return String(text.prefix(prefixCount)) + truncatedSuffix
+    }
 }
 
 // MARK: - Claude Names (persistent, hashed, short)
