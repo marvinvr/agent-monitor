@@ -3,6 +3,42 @@ import AppKit
 // MARK: - Ghostty Tab/Window Switching
 
 extension AppDelegate {
+    struct GhosttyTargetCandidate {
+        let window: AXUIElement
+        let tab: AXUIElement?
+        let orderIndex: Int
+        let guessedTTY: String?
+        let windowTitle: String
+        let windowDocument: String?
+        let tabTitle: String
+        let tabDocument: String?
+
+        var searchableTitle: String {
+            let titles = [tabTitle, windowTitle].filter { !$0.isEmpty }
+            return titles.joined(separator: " | ")
+        }
+
+        var searchableDocuments: [String] {
+            Array(Set([tabDocument, windowDocument].compactMap { $0 }))
+        }
+    }
+
+    struct GhosttyMatchScore: Comparable {
+        let strong: Int
+        let weak: Int
+
+        static func < (lhs: GhosttyMatchScore, rhs: GhosttyMatchScore) -> Bool {
+            if lhs.strong != rhs.strong {
+                return lhs.strong < rhs.strong
+            }
+            return lhs.weak < rhs.weak
+        }
+    }
+
+    struct GhosttyScoredCandidate {
+        let candidate: GhosttyTargetCandidate
+        let score: GhosttyMatchScore
+    }
 
     func jumpTo(_ session: ClaudeSession) {
         guard let ghostty = NSRunningApplication.runningApplications(withBundleIdentifier: "com.mitchellh.ghostty").first else { return }
@@ -23,89 +59,9 @@ extension AppDelegate {
         }
 
         let loginTTYs = ghosttyLoginTTYs(ghosttyPid: ghostty.processIdentifier)
-        let ttyIndex = loginTTYs.firstIndex(of: session.tty)
-        let sessionCwd = session.cwdPath
-        let dirName = sessionCwd.flatMap { ($0 as NSString).lastPathComponent }
-
-        // Prefer TTY-based matching when we can do it deterministically.
-        if windows.count == 1, let idx = ttyIndex {
-            raiseGhosttyWindow(windows[0], app: ghostty)
-            if idx < 9 {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-                    self.pressCommandNumber(idx + 1)
-                }
-            }
-            return
-        }
-
-        // Multi-window mapping: scope by tool and cwd before applying TTY index mapping.
-        if windows.count > 1,
-           let mapped = mapWindowByScopedTTY(session: session, windows: windows, loginTTYs: loginTTYs, sessionCwd: sessionCwd) {
-            raiseGhosttyWindow(mapped, app: ghostty)
-            return
-        }
-
-        let windowPool = candidateWindowPool(for: session, windows: windows)
-
-        // Fallback 1: unique AXDocument match (full cwd path).
-        if let cwd = sessionCwd {
-            let docMatches = windowPool.filter { axDocument(of: $0) == cwd }
-            if docMatches.count == 1, let match = docMatches.first {
-                raiseGhosttyWindow(match, app: ghostty)
-                return
-            }
-        }
-
-        if let remoteMatch = uniqueRemoteWindowMatch(session: session, windows: windowPool) {
-            raiseGhosttyWindow(remoteMatch, app: ghostty)
-            return
-        }
-
-        // Fallback 2: unique window title match by directory name.
-        if let dir = dirName, !dir.isEmpty {
-            let matches = windowPool.filter { axTitle(of: $0).localizedCaseInsensitiveContains(dir) }
-            if matches.count == 1, let match = matches.first {
-                raiseGhosttyWindow(match, app: ghostty)
-                return
-            }
-        }
-
-        // Fallback 3: unique tab-title match across all candidate windows.
-        if let dir = dirName, !dir.isEmpty {
-            var tabMatches: [(window: AXUIElement, tab: AXUIElement)] = []
-            for window in windowPool {
-                for tab in tabs(in: window) {
-                    let tabTitle = axTitle(of: tab)
-                    if tabTitle.localizedCaseInsensitiveContains(dir) {
-                        tabMatches.append((window, tab))
-                    }
-                }
-            }
-            if tabMatches.count == 1, let match = tabMatches.first {
-                AXUIElementPerformAction(match.tab, kAXPressAction as CFString)
-                raiseGhosttyWindow(match.window, app: ghostty)
-                return
-            }
-        }
-
-        if let remoteTabMatch = uniqueRemoteTabMatch(session: session, windows: windowPool) {
-            AXUIElementPerformAction(remoteTabMatch.tab, kAXPressAction as CFString)
-            raiseGhosttyWindow(remoteTabMatch.window, app: ghostty)
-            return
-        }
-
-        // Fallback 4: unique full-path title match.
-        if let cwd = sessionCwd {
-            let matches = windowPool.filter { axTitle(of: $0).contains(cwd) }
-            if matches.count == 1, let match = matches.first {
-                raiseGhosttyWindow(match, app: ghostty)
-                return
-            }
-        }
-
-        // Last resort: deterministic same-tool/same-cwd best effort.
-        if let best = bestEffortWindow(session: session, windows: windows, sessionCwd: sessionCwd, loginTTYs: loginTTYs) {
-            raiseGhosttyWindow(best, app: ghostty)
+        let candidates = ghosttyTargetCandidates(windows: windows, loginTTYs: loginTTYs)
+        if let target = resolvedGhosttyTarget(for: session, candidates: candidates) {
+            activateGhosttyTarget(target, app: ghostty)
             return
         }
 
@@ -133,6 +89,14 @@ extension AppDelegate {
     func raiseGhosttyWindow(_ window: AXUIElement, app: NSRunningApplication) {
         AXUIElementPerformAction(window, kAXRaiseAction as CFString)
         app.activate()
+    }
+
+    func activateGhosttyTarget(_ target: GhosttyTargetCandidate, app: NSRunningApplication) {
+        raiseGhosttyWindow(target.window, app: app)
+        if let tab = target.tab {
+            AXUIElementPerformAction(tab, kAXPressAction as CFString)
+            app.activate()
+        }
     }
 
     func windowsSortedByCreation(_ windows: [AXUIElement]) -> [AXUIElement] {
@@ -172,6 +136,63 @@ extension AppDelegate {
         return positioned.map(\.element)
     }
 
+    func ghosttyTargetCandidates(windows: [AXUIElement], loginTTYs: [String]) -> [GhosttyTargetCandidate] {
+        guard !windows.isEmpty else { return [] }
+
+        let sortedWindows = windowsSortedByCreation(windows)
+        var candidates: [GhosttyTargetCandidate] = []
+        var orderIndex = 0
+
+        for window in sortedWindows {
+            let windowTitle = axTitle(of: window)
+            let windowDocument = axDocument(of: window)
+            let windowTabs = tabs(in: window)
+            if windowTabs.isEmpty {
+                candidates.append(GhosttyTargetCandidate(
+                    window: window,
+                    tab: nil,
+                    orderIndex: orderIndex,
+                    guessedTTY: nil,
+                    windowTitle: windowTitle,
+                    windowDocument: windowDocument,
+                    tabTitle: "",
+                    tabDocument: nil
+                ))
+                orderIndex += 1
+                continue
+            }
+
+            for tab in windowTabs {
+                candidates.append(GhosttyTargetCandidate(
+                    window: window,
+                    tab: tab,
+                    orderIndex: orderIndex,
+                    guessedTTY: nil,
+                    windowTitle: windowTitle,
+                    windowDocument: windowDocument,
+                    tabTitle: axTitle(of: tab),
+                    tabDocument: axDocument(of: tab)
+                ))
+                orderIndex += 1
+            }
+        }
+
+        guard candidates.count == loginTTYs.count else { return candidates }
+
+        return candidates.enumerated().map { index, candidate in
+            GhosttyTargetCandidate(
+                window: candidate.window,
+                tab: candidate.tab,
+                orderIndex: candidate.orderIndex,
+                guessedTTY: loginTTYs[index],
+                windowTitle: candidate.windowTitle,
+                windowDocument: candidate.windowDocument,
+                tabTitle: candidate.tabTitle,
+                tabDocument: candidate.tabDocument
+            )
+        }
+    }
+
     func tabs(in window: AXUIElement) -> [AXUIElement] {
         var childrenRef: AnyObject?
         guard AXUIElementCopyAttributeValue(window, kAXChildrenAttribute as CFString, &childrenRef) == .success,
@@ -197,12 +218,6 @@ extension AppDelegate {
         return nil
     }
 
-    func candidateWindowPool(for session: ClaudeSession, windows: [AXUIElement]) -> [AXUIElement] {
-        guard !session.isRemote else { return windows }
-        let toolWindows = windows.filter { windowLikelyMatchesTool($0, tool: session.tool) }
-        return toolWindows.isEmpty ? windows : toolWindows
-    }
-
     func remoteTitleNeedles(for session: ClaudeSession) -> [String] {
         guard let remoteHost = session.remoteHost, !remoteHost.isEmpty else { return [] }
         let rawHost = remoteHost.split(separator: "@").last.map(String.init) ?? remoteHost
@@ -217,109 +232,75 @@ extension AppDelegate {
         return Array(Set([hostWithoutPort, shortHost]).filter { !$0.isEmpty })
     }
 
-    func uniqueRemoteWindowMatch(session: ClaudeSession, windows: [AXUIElement]) -> AXUIElement? {
-        let needles = remoteTitleNeedles(for: session)
-        guard !needles.isEmpty else { return nil }
-        let matches = windows.filter { window in
-            let title = axTitle(of: window)
-            return needles.contains(where: { title.localizedCaseInsensitiveContains($0) })
-        }
-        return matches.count == 1 ? matches.first : nil
+    func titleToolHint(for candidate: GhosttyTargetCandidate) -> SessionTool? {
+        let title = candidate.searchableTitle.lowercased()
+        if title.contains("codex") { return .codex }
+        if title.contains("claude") { return .claude }
+        return nil
     }
 
-    func uniqueRemoteTabMatch(session: ClaudeSession, windows: [AXUIElement]) -> (window: AXUIElement, tab: AXUIElement)? {
-        let needles = remoteTitleNeedles(for: session)
-        guard !needles.isEmpty else { return nil }
-
-        var matches: [(window: AXUIElement, tab: AXUIElement)] = []
-        for window in windows {
-            for tab in tabs(in: window) {
-                let title = axTitle(of: tab)
-                if needles.contains(where: { title.localizedCaseInsensitiveContains($0) }) {
-                    matches.append((window, tab))
-                }
-            }
-        }
-        return matches.count == 1 ? matches.first : nil
-    }
-
-    func windowLikelyMatchesTool(_ window: AXUIElement, tool: SessionTool) -> Bool {
-        let title = axTitle(of: window).lowercased()
-        switch tool {
-        case .codex:
-            return title.contains("codex")
-        case .claude:
-            return !title.contains("codex")
-        case .terminal:
-            return !title.contains("codex") && !title.contains("claude")
-        }
-    }
-
-    func mapWindowByScopedTTY(session: ClaudeSession, windows: [AXUIElement], loginTTYs: [String], sessionCwd: String?) -> AXUIElement? {
-        let sorted = windowsSortedByCreation(windows)
-        var candidateWindows = sorted
-
-        if let cwd = sessionCwd {
-            let docMatches = candidateWindows.filter { axDocument(of: $0) == cwd }
-            if !docMatches.isEmpty { candidateWindows = docMatches }
-        }
+    func ghosttyMatchScore(for session: ClaudeSession, candidate: GhosttyTargetCandidate) -> GhosttyMatchScore {
+        var strong = 0
+        var weak = 0
 
         if session.isRemote {
-            let hostMatches = candidateWindows.filter { window in
-                let title = axTitle(of: window)
-                return remoteTitleNeedles(for: session).contains(where: { title.localizedCaseInsensitiveContains($0) })
+            let needles = remoteTitleNeedles(for: session)
+            if needles.contains(where: { needle in
+                candidate.searchableTitle.localizedCaseInsensitiveContains(needle)
+            }) {
+                strong += 320
             }
-            if !hostMatches.isEmpty { candidateWindows = hostMatches }
-        } else if session.tool != .terminal {
-            let toolMatches = candidateWindows.filter { windowLikelyMatchesTool($0, tool: session.tool) }
-            if !toolMatches.isEmpty { candidateWindows = toolMatches }
+        } else if let cwd = session.cwdPath {
+            if candidate.searchableDocuments.contains(cwd) {
+                strong += 320
+            } else if candidate.searchableTitle.contains(cwd) {
+                strong += 140
+            }
+
+            let dirName = (cwd as NSString).lastPathComponent
+            if !dirName.isEmpty && candidate.searchableTitle.localizedCaseInsensitiveContains(dirName) {
+                strong += 40
+            }
         }
 
-        let peerToolSessions: [ClaudeSession]
-        if session.isRemote {
-            peerToolSessions = sessions.filter { $0.isRemote && $0.remoteHost == session.remoteHost }
+        if let hintedTool = titleToolHint(for: candidate) {
+            if hintedTool == session.tool {
+                strong += 140
+            } else if session.tool == .terminal {
+                strong -= 80
+            } else {
+                strong -= 220
+            }
         } else if session.tool == .terminal {
-            peerToolSessions = sessions.filter { !$0.isRemote && $0.tool == .terminal }
-        } else {
-            peerToolSessions = sessions.filter { !$0.isRemote && $0.tool == session.tool }
-        }
-        var peerTTYs = Set(peerToolSessions.map(\.tty))
-
-        if let cwd = sessionCwd {
-            let sameCwdTTYs = Set(
-                peerToolSessions
-                    .filter { $0.cwdPath == cwd }
-                    .map(\.tty)
-            )
-            if !sameCwdTTYs.isEmpty { peerTTYs = sameCwdTTYs }
+            strong += 20
         }
 
-        let orderedTTYs = loginTTYs.filter { peerTTYs.contains($0) }
-        guard orderedTTYs.count == candidateWindows.count,
-              let idx = orderedTTYs.firstIndex(of: session.tty),
-              idx < candidateWindows.count else { return nil }
-        return candidateWindows[idx]
+        if candidate.guessedTTY == session.tty {
+            weak += 30
+        }
+        weak -= candidate.orderIndex
+
+        return GhosttyMatchScore(strong: strong, weak: weak)
     }
 
-    func bestEffortWindow(session: ClaudeSession, windows: [AXUIElement], sessionCwd: String?, loginTTYs: [String]) -> AXUIElement? {
-        let sorted = windowsSortedByCreation(windows)
-        var pool = candidateWindowPool(for: session, windows: sorted)
+    func resolvedGhosttyTarget(for session: ClaudeSession, candidates: [GhosttyTargetCandidate]) -> GhosttyTargetCandidate? {
+        let ranked = candidates
+            .map { GhosttyScoredCandidate(candidate: $0, score: ghosttyMatchScore(for: session, candidate: $0)) }
+            .sorted { lhs, rhs in
+                if lhs.score != rhs.score {
+                    return lhs.score > rhs.score
+                }
+                return lhs.candidate.orderIndex < rhs.candidate.orderIndex
+            }
 
-        if session.isRemote, let remoteMatch = uniqueRemoteWindowMatch(session: session, windows: pool) {
-            return remoteMatch
-        }
+        guard let best = ranked.first else { return nil }
+        guard best.score.strong >= 140 else { return nil }
 
-        if let cwd = sessionCwd {
-            let docMatches = pool.filter { axDocument(of: $0) == cwd }
-            if !docMatches.isEmpty { pool = docMatches }
-        }
+        let bestStrongScore = best.score.strong
+        let strongTieCount = ranked.filter { $0.score.strong == bestStrongScore }.count
+        guard strongTieCount == 1 else { return nil }
 
-        if pool.count > 1,
-           let mapped = mapWindowByScopedTTY(session: session, windows: pool, loginTTYs: loginTTYs, sessionCwd: sessionCwd) {
-            return mapped
-        }
-
-        return pool.first
+        return best.candidate
     }
 
     // MARK: - Process Helpers
@@ -350,20 +331,4 @@ extension AppDelegate {
         return entries.sorted { $0.pid < $1.pid }.map(\.tty)
     }
 
-    func pressCommandNumber(_ number: Int) {
-        let keyCodes: [Int: UInt16] = [
-            1: 18, 2: 19, 3: 20, 4: 21, 5: 23,
-            6: 22, 7: 26, 8: 28, 9: 25
-        ]
-        guard let keyCode = keyCodes[number] else { return }
-        let src = CGEventSource(stateID: .hidSystemState)
-        if let keyDown = CGEvent(keyboardEventSource: src, virtualKey: keyCode, keyDown: true) {
-            keyDown.flags = .maskCommand
-            keyDown.post(tap: .cghidEventTap)
-        }
-        if let keyUp = CGEvent(keyboardEventSource: src, virtualKey: keyCode, keyDown: false) {
-            keyUp.flags = .maskCommand
-            keyUp.post(tap: .cghidEventTap)
-        }
-    }
 }
