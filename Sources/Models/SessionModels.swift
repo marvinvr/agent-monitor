@@ -28,6 +28,29 @@ enum SessionTool: String {
     }
 }
 
+enum SessionHostApp: String {
+    case ghostty
+    case solo
+
+    var displayName: String {
+        switch self {
+        case .ghostty:
+            return "Ghostty"
+        case .solo:
+            return "Solo"
+        }
+    }
+
+    var bundleIdentifier: String {
+        switch self {
+        case .ghostty:
+            return "com.mitchellh.ghostty"
+        case .solo:
+            return "com.soloterm.solo"
+        }
+    }
+}
+
 // MARK: - Session State
 
 enum SessionState {
@@ -76,6 +99,7 @@ struct ClaudeSession: Hashable {
     let conversationMatchStatus: ConversationMatchStatus
     let remoteHost: String?
     let remoteTTY: String?
+    let hostApp: SessionHostApp?
 
     var isRemote: Bool { remoteHost != nil }
     var shouldAnimate: Bool { tool.supportsAnimation }
@@ -181,6 +205,7 @@ struct ClaudeSession: Hashable {
         } else {
             remote = ""
         }
+        let host = hostApp.map { "\nHost: \($0.displayName)" } ?? ""
         let match: String
         switch conversationMatchStatus {
         case .verified:
@@ -192,7 +217,7 @@ struct ClaudeSession: Hashable {
         case .unavailable:
             match = ""
         }
-        return "\(name) [\(toolName)] - \(stateStr) (\(cpu) CPU)\(folder)\nPID: \(pid) [\(tty)]\(remote)\(convo)\(match)"
+        return "\(name) [\(toolName)] - \(stateStr) (\(cpu) CPU)\(folder)\nPID: \(pid) [\(tty)]\(remote)\(host)\(convo)\(match)"
     }
 
     func hash(into hasher: inout Hasher) { hasher.combine(pid) }

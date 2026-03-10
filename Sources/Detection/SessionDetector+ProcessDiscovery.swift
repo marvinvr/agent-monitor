@@ -5,6 +5,7 @@ func localAgentSessions(from processes: [ProcessSnapshot], byParent: [Int32: [Pr
     var sessions: [ClaudeSession] = []
     var seen = Set<Int32>()
     var activeClaudeCountByCwd: [String: Int] = [:]
+    let byPid = Dictionary(uniqueKeysWithValues: processes.map { ($0.pid, $0) })
 
     for process in processes {
         guard let tool = tool(for: process),
@@ -86,7 +87,8 @@ func localAgentSessions(from processes: [ProcessSnapshot], byParent: [Int32: [Pr
             conversationTitle: title,
             conversationMatchStatus: convo.matchStatus,
             remoteHost: nil,
-            remoteTTY: nil
+            remoteTTY: nil,
+            hostApp: owningHostApp(forPid: pid, byPid: byPid)
         ))
     }
 
@@ -96,13 +98,19 @@ func localAgentSessions(from processes: [ProcessSnapshot], byParent: [Int32: [Pr
 func remoteAgentSessions(from localProcesses: [ProcessSnapshot]) -> [ClaudeSession] {
     let proxies = remoteSSHProxySessions(from: localProcesses)
     guard !proxies.isEmpty else { return [] }
+    let localByPid = Dictionary(uniqueKeysWithValues: localProcesses.map { ($0.pid, $0) })
 
     let grouped = Dictionary(grouping: proxies, by: { $0.destination })
     var sessions: [ClaudeSession] = []
 
     for (destination, group) in grouped {
         guard let snapshot = remoteSnapshot(for: destination) else { continue }
-        sessions.append(contentsOf: synthesizeRemoteSessions(for: group, destination: destination, snapshot: snapshot))
+        sessions.append(contentsOf: synthesizeRemoteSessions(
+            for: group,
+            destination: destination,
+            snapshot: snapshot,
+            localByPid: localByPid
+        ))
     }
 
     return sessions
@@ -201,7 +209,8 @@ func ghosttyTerminalSessions(
             conversationTitle: title,
             conversationMatchStatus: .unavailable,
             remoteHost: draft.sshDestination?.displayName,
-            remoteTTY: nil
+            remoteTTY: nil,
+            hostApp: .ghostty
         ))
     }
 
@@ -211,7 +220,8 @@ func ghosttyTerminalSessions(
 func synthesizeRemoteSessions(
     for proxies: [SSHProxySession],
     destination: SSHDestination,
-    snapshot: RemoteHostSnapshot
+    snapshot: RemoteHostSnapshot,
+    localByPid: [Int32: ProcessSnapshot]
 ) -> [ClaudeSession] {
     let sortedProxies = proxies.sorted { $0.pid < $1.pid }
     let orderedTTYs = remoteTTYOrder(from: snapshot.processes)
@@ -254,12 +264,33 @@ func synthesizeRemoteSessions(
                 conversationTitle: nil,
                 conversationMatchStatus: .unavailable,
                 remoteHost: destination.displayName,
-                remoteTTY: remoteTTY
+                remoteTTY: remoteTTY,
+                hostApp: owningHostApp(forPid: proxy.pid, byPid: localByPid)
             ))
         }
     }
 
     return sessions
+}
+
+func owningHostApp(forPid pid: Int32, byPid: [Int32: ProcessSnapshot]) -> SessionHostApp? {
+    var currentPid: Int32? = pid
+    var visited = Set<Int32>()
+
+    while let pidToCheck = currentPid,
+          visited.insert(pidToCheck).inserted,
+          let process = byPid[pidToCheck] {
+        switch process.binaryName.lowercased() {
+        case "ghostty":
+            return .ghostty
+        case "solo":
+            return .solo
+        default:
+            currentPid = process.ppid > 0 ? process.ppid : nil
+        }
+    }
+
+    return nil
 }
 
 func parseProcessSnapshots(from output: String) -> [ProcessSnapshot] {
