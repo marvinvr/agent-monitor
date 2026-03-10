@@ -47,6 +47,8 @@ extension AppDelegate {
 
     struct SoloShortcutTarget {
         let projectIndex: Int
+        let projectCount: Int
+        let projectName: String
         let processIndex: Int
         let processName: String
     }
@@ -493,7 +495,6 @@ extension AppDelegate {
     func activateSoloShortcutTarget(_ target: SoloShortcutTarget, app: NSRunningApplication) -> Bool {
         guard (1...9).contains(target.projectIndex),
               (1...9).contains(target.processIndex),
-              let projectKey = digitKeyCode(for: target.projectIndex),
               let processKey = digitKeyCode(for: target.processIndex) else {
             return false
         }
@@ -503,12 +504,75 @@ extension AppDelegate {
         guard ensureSoloMainWindow(app: app) else { return false }
         usleep(120_000)
 
-        pressKey(projectKey, flags: .maskAlternate)
-        usleep(140_000)
+        if shouldSwitchSoloProject(to: target, app: app) {
+            guard let projectKey = digitKeyCode(for: target.projectIndex) else {
+                return false
+            }
+            pressKey(projectKey, flags: .maskAlternate)
+            usleep(140_000)
+        }
+
         pressKey(processKey, flags: .maskCommand)
         usleep(140_000)
         app.activate()
         return true
+    }
+
+    func shouldSwitchSoloProject(to target: SoloShortcutTarget, app: NSRunningApplication) -> Bool {
+        if target.projectCount <= 1 {
+            return false
+        }
+
+        guard let selectedProjectName = soloSelectedProjectName(app: app) else {
+            return true
+        }
+
+        return !selectedProjectName.localizedCaseInsensitiveContains(target.projectName)
+    }
+
+    func soloSelectedProjectName(app: NSRunningApplication) -> String? {
+        let axApp = AXUIElementCreateApplication(app.processIdentifier)
+        guard let focusedWindow = axElement(of: axApp, attribute: kAXFocusedWindowAttribute as String) else {
+            return nil
+        }
+
+        let texts = axStaticTexts(in: focusedWindow)
+        for text in texts {
+            guard let separator = text.range(of: " - ") else { continue }
+            let projectName = text[..<separator.lowerBound].trimmingCharacters(in: .whitespacesAndNewlines)
+            if !projectName.isEmpty {
+                return projectName
+            }
+        }
+
+        return nil
+    }
+
+    func axStaticTexts(in root: AXUIElement) -> [String] {
+        var queue = [root]
+        var index = 0
+        var texts: [String] = []
+
+        while index < queue.count {
+            let element = queue[index]
+            index += 1
+
+            var roleRef: AnyObject?
+            AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &roleRef)
+            let role = roleRef as? String ?? ""
+
+            if role == kAXStaticTextRole as String {
+                let text = axTitle(of: element).trimmingCharacters(in: .whitespacesAndNewlines)
+                if !text.isEmpty {
+                    texts.append(text)
+                }
+            }
+
+            queue.append(contentsOf: axChildren(of: element))
+            queue.append(contentsOf: axChildren(of: element, attribute: kAXContentsAttribute as String))
+        }
+
+        return texts
     }
 
     func soloCommandPaletteButton(in windows: [AXUIElement], matching processName: String) -> AXUIElement? {
@@ -572,10 +636,13 @@ extension AppDelegate {
             )
             select
                 ordered_projects.project_index,
+                (select count(*) from ordered_projects),
+                coalesce(projects.display_name, projects.name),
                 ordered_processes.process_index,
                 live.process_name
             from live
             join ordered_projects on ordered_projects.path = live.project_path
+            join projects on projects.id = ordered_projects.id
             join ordered_processes
                 on ordered_processes.project_id = ordered_projects.id
                and ordered_processes.name = live.process_name
@@ -585,17 +652,21 @@ extension AppDelegate {
         }
 
         let fields = output.split(separator: "|", omittingEmptySubsequences: false).map(String.init)
-        guard fields.count == 3,
+        guard fields.count == 5,
               let projectIndex = Int(fields[0]),
-              let processIndex = Int(fields[1]) else {
+              let projectCount = Int(fields[1]),
+              let processIndex = Int(fields[3]) else {
             return nil
         }
 
-        let processName = fields[2].trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !processName.isEmpty else { return nil }
+        let projectName = fields[2].trimmingCharacters(in: .whitespacesAndNewlines)
+        let processName = fields[4].trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !projectName.isEmpty, !processName.isEmpty else { return nil }
 
         return SoloShortcutTarget(
             projectIndex: projectIndex,
+            projectCount: projectCount,
+            projectName: projectName,
             processIndex: processIndex,
             processName: processName
         )
