@@ -95,7 +95,10 @@ func localAgentSessions(from processes: [ProcessSnapshot], byParent: [Int32: [Pr
     return sessions
 }
 
-func remoteAgentSessions(from localProcesses: [ProcessSnapshot]) -> [MonitorSession] {
+func remoteAgentSessions(
+    from localProcesses: [ProcessSnapshot],
+    remoteSnapshotPolicy: RemoteSnapshotPolicy
+) -> [MonitorSession] {
     let proxies = remoteSSHProxySessions(from: localProcesses)
     guard !proxies.isEmpty else { return [] }
     let localByPid = Dictionary(uniqueKeysWithValues: localProcesses.map { ($0.pid, $0) })
@@ -104,7 +107,10 @@ func remoteAgentSessions(from localProcesses: [ProcessSnapshot]) -> [MonitorSess
     var sessions: [MonitorSession] = []
 
     for (destination, group) in grouped {
-        guard let snapshot = remoteSnapshot(for: destination) else { continue }
+        guard let snapshot = remoteSnapshot(
+            for: destination,
+            policy: remoteSnapshotPolicy
+        ) else { continue }
         sessions.append(contentsOf: synthesizeRemoteSessions(
             for: group,
             destination: destination,
@@ -506,16 +512,54 @@ func sshDestination(from command: String) -> SSHDestination? {
     return SSHDestination(target: target, port: port)
 }
 
-func remoteSnapshot(for destination: SSHDestination) -> RemoteHostSnapshot? {
+func remoteSnapshot(
+    for destination: SSHDestination,
+    policy: RemoteSnapshotPolicy
+) -> RemoteHostSnapshot? {
     let now = Date()
-    if let cached = remoteSnapshotCache[destination],
-       now.timeIntervalSince(cached.fetchedAt) < remoteSnapshotTTL {
-        return cached.snapshot
+    if let cached = remoteSnapshotCache[destination] {
+        switch policy {
+        case .cachedOnly:
+            return cached.snapshot
+        case .refreshExpired:
+            if now.timeIntervalSince(cached.fetchedAt) < remoteSnapshotTTL {
+                return cached.snapshot
+            }
+        case .forceRefresh:
+            break
+        }
     }
 
+    guard policy != .cachedOnly else { return nil }
+    return fetchRemoteSnapshot(for: destination, fetchedAt: now)
+}
+
+@discardableResult
+func refreshRemoteSnapshot(
+    for destination: SSHDestination,
+    policy: RemoteSnapshotPolicy
+) -> Bool {
+    let now = Date()
+    if policy == .refreshExpired,
+       let cached = remoteSnapshotCache[destination],
+       now.timeIntervalSince(cached.fetchedAt) < remoteSnapshotTTL {
+        return false
+    }
+    guard policy != .cachedOnly else { return false }
+    return fetchRemoteSnapshot(for: destination, fetchedAt: now) != nil
+}
+
+private func fetchRemoteSnapshot(
+    for destination: SSHDestination,
+    fetchedAt: Date
+) -> RemoteHostSnapshot? {
+    let previousSnapshot = remoteSnapshotCache[destination]?.snapshot
     guard let output = runProcess(path: "/usr/bin/ssh", arguments: destination.sshArgs) else {
-        remoteSnapshotCache[destination] = CachedRemoteSnapshot(fetchedAt: now, snapshot: nil)
-        return nil
+        remoteSnapshotCache[destination] = CachedRemoteSnapshot(
+            fetchedAt: fetchedAt,
+            snapshot: previousSnapshot
+        )
+        return previousSnapshot
     }
 
     let processes = parseProcessSnapshots(from: output)
@@ -523,7 +567,10 @@ func remoteSnapshot(for destination: SSHDestination) -> RemoteHostSnapshot? {
         processes: processes,
         byParent: Dictionary(grouping: processes, by: \.ppid)
     )
-    remoteSnapshotCache[destination] = CachedRemoteSnapshot(fetchedAt: now, snapshot: snapshot)
+    remoteSnapshotCache[destination] = CachedRemoteSnapshot(
+        fetchedAt: fetchedAt,
+        snapshot: snapshot
+    )
     return snapshot
 }
 

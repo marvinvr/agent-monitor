@@ -3,6 +3,16 @@ import Foundation
 // MARK: - Session Detector
 
 class SessionDetector {
+    enum RemoteSnapshotPolicy {
+        case cachedOnly
+        case refreshExpired
+        case forceRefresh
+    }
+
+    struct DetectionContext {
+        let remoteSnapshotPolicy: RemoteSnapshotPolicy
+    }
+
     private let providers: [any SessionProvider] = [
         LocalAgentSessionProvider(),
         RemoteAgentSessionProvider(),
@@ -90,6 +100,7 @@ class SessionDetector {
     var claudeExactSessionIdCacheByPid: [Int32: CachedValue<String>] = [:]
     var claudeHistorySessionIdCacheByPid: [Int32: CachedValue<String>] = [:]
     var remoteSnapshotCache: [SSHDestination: CachedRemoteSnapshot] = [:]
+    private(set) var lastSeenRemoteDestinations: Set<SSHDestination> = []
     let remoteSnapshotTTL: TimeInterval = 8
     let cwdFoundCacheTTL: TimeInterval = 20
     let cwdMissingCacheTTL: TimeInterval = 4
@@ -99,16 +110,29 @@ class SessionDetector {
     let claudeProjectEntriesCacheTTL: TimeInterval = 15
     let agentStartupIdleGrace = 4
 
-    func detectSessions() -> [MonitorSession] {
+    func detectSessions(
+        remoteSnapshotPolicy: RemoteSnapshotPolicy = .refreshExpired
+    ) -> [MonitorSession] {
         guard let snapshot = makeSnapshot() else {
             return []
         }
+        return detectSessions(
+            in: snapshot,
+            context: DetectionContext(remoteSnapshotPolicy: remoteSnapshotPolicy)
+        )
+    }
 
+    func detectSessions(
+        in snapshot: SystemSnapshot,
+        context: DetectionContext
+    ) -> [MonitorSession] {
         var sessions: [MonitorSession] = []
+        updateRemoteDestinations(from: snapshot)
         for provider in providers {
             sessions.append(contentsOf: provider.detect(
                 in: snapshot,
                 existingSessions: sessions,
+                context: context,
                 detector: self
             ))
         }
@@ -125,8 +149,6 @@ class SessionDetector {
         processStartDateCacheByPid = processStartDateCacheByPid.filter { alive.contains($0.key) }
         claudeExactSessionIdCacheByPid = claudeExactSessionIdCacheByPid.filter { alive.contains($0.key) }
         claudeHistorySessionIdCacheByPid = claudeHistorySessionIdCacheByPid.filter { alive.contains($0.key) }
-        let activeDestinations = Set(remoteSSHProxySessions(from: snapshot.processes).map { $0.destination })
-        remoteSnapshotCache = remoteSnapshotCache.filter { activeDestinations.contains($0.key) }
 
         let activeNamingKeys = Set(sessions.map { session -> String in
             if let remoteHost = session.remoteHost {
@@ -154,6 +176,25 @@ class SessionDetector {
         return sessions
     }
 
+    @discardableResult
+    func refreshRemoteSnapshots(
+        in snapshot: SystemSnapshot,
+        policy: RemoteSnapshotPolicy
+    ) -> Bool {
+        updateRemoteDestinations(from: snapshot)
+        guard policy != .cachedOnly else { return false }
+
+        var refreshedAny = false
+        for destination in lastSeenRemoteDestinations {
+            let didRefresh = refreshRemoteSnapshot(
+                for: destination,
+                policy: policy
+            )
+            refreshedAny = refreshedAny || didRefresh
+        }
+        return refreshedAny
+    }
+
     func makeSnapshot() -> SystemSnapshot? {
         guard let output = runProcess(path: "/bin/ps", arguments: ["-eo", "pid,ppid,tty,etime,%cpu,command"]) else {
             return nil
@@ -169,8 +210,14 @@ class SessionDetector {
         localAgentSessions(from: snapshot.processes, byParent: snapshot.byParent)
     }
 
-    func detectRemoteAgentSessions(in snapshot: SystemSnapshot) -> [MonitorSession] {
-        remoteAgentSessions(from: snapshot.processes)
+    func detectRemoteAgentSessions(
+        in snapshot: SystemSnapshot,
+        remoteSnapshotPolicy: RemoteSnapshotPolicy
+    ) -> [MonitorSession] {
+        remoteAgentSessions(
+            from: snapshot.processes,
+            remoteSnapshotPolicy: remoteSnapshotPolicy
+        )
     }
 
     func detectGhosttyTerminalSessions(in snapshot: SystemSnapshot, existingSessions: [MonitorSession]) -> [MonitorSession] {
@@ -179,6 +226,13 @@ class SessionDetector {
             byParent: snapshot.byParent,
             excludingTTYs: Set(existingSessions.map { $0.tty })
         )
+    }
+
+    private func updateRemoteDestinations(from snapshot: SystemSnapshot) {
+        lastSeenRemoteDestinations = Set(
+            remoteSSHProxySessions(from: snapshot.processes).map(\.destination)
+        )
+        remoteSnapshotCache = remoteSnapshotCache.filter { lastSeenRemoteDestinations.contains($0.key) }
     }
 
 }

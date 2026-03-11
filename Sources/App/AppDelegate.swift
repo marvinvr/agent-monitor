@@ -19,13 +19,22 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private let pollQueue = DispatchQueue(label: "com.mvr.agent-monitor.poll", qos: .utility)
     private let visiblePollInterval: TimeInterval = 2.0
     private let backgroundPollInterval: TimeInterval = 4.0
+    private let remoteVisibleWorkingPollInterval: TimeInterval = 5.0
+    private let remoteVisibleIdlePollInterval: TimeInterval = 10.0
+    private let remoteBackgroundPollInterval: TimeInterval = 20.0
+    private let remoteBurstPollInterval: TimeInterval = 2.0
+    private let remoteBurstDuration: TimeInterval = 15.0
     private let baseAnimationInterval: TimeInterval = 0.33
-    private var isPolling = false
+    private var isDetectorBusy = false
     private var pollRequestedWhileBusy = false
+    private var queuedRemoteRefreshPolicy: SessionDetector.RemoteSnapshotPolicy?
     private var hasCompletedInitialPoll = false
     private var pollTimer: Timer?
+    private var remotePollTimer: Timer?
     private var animationTimer: Timer?
     private var animationFrameStep = 1
+    private var remoteBurstUntil: Date?
+    private var knownRemoteDestinations: Set<SessionDetector.SSHDestination> = []
     var soloShortcutTargetCacheByPid: [Int32: AppDelegate.SoloShortcutTarget] = [:]
     var soloProcessNameCacheByPid: [Int32: String] = [:]
     var soloSessionCacheFingerprint: String?
@@ -69,6 +78,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         )
 
         refreshPollTimer()
+        refreshRemotePollTimer()
         refreshAnimationTimer()
         pollSessions()
     }
@@ -78,6 +88,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         ProcessInfo.processInfo.enableSuddenTermination()
         NotificationCenter.default.removeObserver(self)
         pollTimer?.invalidate()
+        remotePollTimer?.invalidate()
         animationTimer?.invalidate()
     }
 
@@ -110,11 +121,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     @objc func showPanel() {
         panel.orderFront(nil)
         refreshPollTimer()
+        refreshRemotePollTimer()
         refreshAnimationTimer()
     }
 
     @objc private func applicationOcclusionStateDidChange() {
         refreshPollTimer()
+        refreshRemotePollTimer()
         refreshAnimationTimer()
     }
 
@@ -140,6 +153,47 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         timer.tolerance = interval * 0.25
         RunLoop.main.add(timer, forMode: .common)
         pollTimer = timer
+    }
+
+    private func currentRemotePollInterval() -> TimeInterval? {
+        guard !knownRemoteDestinations.isEmpty else { return nil }
+
+        if monitorIsVisibleForUpdates(),
+           let remoteBurstUntil,
+           remoteBurstUntil > Date() {
+            return remoteBurstPollInterval
+        }
+
+        guard monitorIsVisibleForUpdates() else {
+            return remoteBackgroundPollInterval
+        }
+
+        if sessions.contains(where: { $0.isRemote && $0.state == .working }) {
+            return remoteVisibleWorkingPollInterval
+        }
+        return remoteVisibleIdlePollInterval
+    }
+
+    private func refreshRemotePollTimer() {
+        guard let interval = currentRemotePollInterval() else {
+            remotePollTimer?.invalidate()
+            remotePollTimer = nil
+            return
+        }
+
+        if let existing = remotePollTimer,
+           existing.timeInterval == interval,
+           existing.isValid {
+            return
+        }
+
+        remotePollTimer?.invalidate()
+        let timer = Timer(timeInterval: interval, repeats: true) { [weak self] _ in
+            self?.requestRemoteRefresh(policy: .forceRefresh)
+        }
+        timer.tolerance = interval * 0.3
+        RunLoop.main.add(timer, forMode: .common)
+        remotePollTimer = timer
     }
 
     private func refreshAnimationTimer() {
@@ -207,35 +261,154 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func pollSessions() {
-        guard !isPolling else {
-            pollRequestedWhileBusy = true
+        pollRequestedWhileBusy = true
+        processQueuedDetectorWork()
+    }
+
+    private func requestRemoteRefresh(policy: SessionDetector.RemoteSnapshotPolicy) {
+        queuedRemoteRefreshPolicy = mergedRemoteRefreshPolicy(
+            queuedRemoteRefreshPolicy,
+            with: policy
+        )
+        processQueuedDetectorWork()
+    }
+
+    private func processQueuedDetectorWork() {
+        guard !isDetectorBusy else { return }
+
+        if pollRequestedWhileBusy {
+            pollRequestedWhileBusy = false
+            startLocalPoll()
             return
         }
-        isPolling = true
-        pollRequestedWhileBusy = false
+
+        if let queuedRemoteRefreshPolicy {
+            self.queuedRemoteRefreshPolicy = nil
+            startRemoteRefresh(policy: queuedRemoteRefreshPolicy)
+        }
+    }
+
+    private func startLocalPoll() {
+        isDetectorBusy = true
         pollQueue.async {
-            let newSessions = self.detector.detectSessions()
-            DispatchQueue.main.async {
-                let oldSessions = self.sessions
-                let oldFP = oldSessions.map { "\($0.pid):\($0.state):\($0.tool):\($0.displayName):\($0.conversationMatchStatus.rawValue)" }.joined()
-                let newFP = newSessions.map { "\($0.pid):\($0.state):\($0.tool):\($0.displayName):\($0.conversationMatchStatus.rawValue)" }.joined()
-                let isInitialPoll = !self.hasCompletedInitialPoll
-                self.hasCompletedInitialPoll = true
-                self.playAttentionSoundIfNeeded(oldSessions: oldSessions, newSessions: newSessions, isInitialPoll: isInitialPoll)
-                self.sessions = newSessions
-                self.pruneHostLookupCaches(alivePids: Set(newSessions.map(\.pid)))
-                HostRegistry.refreshCaches(for: newSessions, appDelegate: self)
-                if isInitialPoll || oldFP != newFP { self.rebuildViews() }
-                self.refreshPollTimer()
-                self.refreshAnimationTimer()
-                let shouldPollAgain = self.pollRequestedWhileBusy
-                self.pollRequestedWhileBusy = false
-                self.isPolling = false
-                if shouldPollAgain {
-                    self.pollSessions()
+            guard let snapshot = self.detector.makeSnapshot() else {
+                DispatchQueue.main.async {
+                    self.applyDetectedSessions([], remoteDestinations: self.knownRemoteDestinations)
+                    self.finishDetectorWork()
                 }
+                return
+            }
+
+            let newSessions = self.detector.detectSessions(
+                in: snapshot,
+                context: .init(remoteSnapshotPolicy: .cachedOnly)
+            )
+            let remoteDestinations = self.detector.lastSeenRemoteDestinations
+            DispatchQueue.main.async {
+                self.applyDetectedSessions(newSessions, remoteDestinations: remoteDestinations)
+                self.finishDetectorWork()
             }
         }
+    }
+
+    private func startRemoteRefresh(policy: SessionDetector.RemoteSnapshotPolicy) {
+        isDetectorBusy = true
+        pollQueue.async {
+            guard let snapshot = self.detector.makeSnapshot() else {
+                DispatchQueue.main.async {
+                    self.finishDetectorWork()
+                }
+                return
+            }
+
+            _ = self.detector.refreshRemoteSnapshots(in: snapshot, policy: policy)
+            let newSessions = self.detector.detectSessions(
+                in: snapshot,
+                context: .init(remoteSnapshotPolicy: .cachedOnly)
+            )
+            let remoteDestinations = self.detector.lastSeenRemoteDestinations
+            DispatchQueue.main.async {
+                self.applyDetectedSessions(newSessions, remoteDestinations: remoteDestinations)
+                self.finishDetectorWork()
+            }
+        }
+    }
+
+    private func finishDetectorWork() {
+        isDetectorBusy = false
+        processQueuedDetectorWork()
+    }
+
+    private func mergedRemoteRefreshPolicy(
+        _ lhs: SessionDetector.RemoteSnapshotPolicy?,
+        with rhs: SessionDetector.RemoteSnapshotPolicy
+    ) -> SessionDetector.RemoteSnapshotPolicy {
+        guard let lhs else { return rhs }
+        if lhs == .forceRefresh || rhs == .forceRefresh {
+            return .forceRefresh
+        }
+        if lhs == .refreshExpired || rhs == .refreshExpired {
+            return .refreshExpired
+        }
+        return .cachedOnly
+    }
+
+    private func applyDetectedSessions(
+        _ newSessions: [MonitorSession],
+        remoteDestinations: Set<SessionDetector.SSHDestination>
+    ) {
+        let previousRemoteDestinations = knownRemoteDestinations
+        let hadRemoteState = sessions.contains(where: \.isRemote)
+        let oldSessions = sessions
+        let oldFP = oldSessions.map { "\($0.pid):\($0.state):\($0.tool):\($0.displayName):\($0.conversationMatchStatus.rawValue)" }.joined()
+        let newFP = newSessions.map { "\($0.pid):\($0.state):\($0.tool):\($0.displayName):\($0.conversationMatchStatus.rawValue)" }.joined()
+        let isInitialPoll = !hasCompletedInitialPoll
+        hasCompletedInitialPoll = true
+        playAttentionSoundIfNeeded(oldSessions: oldSessions, newSessions: newSessions, isInitialPoll: isInitialPoll)
+        sessions = newSessions
+        knownRemoteDestinations = remoteDestinations
+        pruneHostLookupCaches(alivePids: Set(newSessions.map(\.pid)))
+        HostRegistry.refreshCaches(for: newSessions, appDelegate: self)
+
+        let oldRemoteFP = oldSessions
+            .filter(\.isRemote)
+            .map { "\($0.pid):\($0.state):\($0.displayName):\($0.conversationMatchStatus.rawValue)" }
+            .joined()
+        let newRemoteFP = newSessions
+            .filter(\.isRemote)
+            .map { "\($0.pid):\($0.state):\($0.displayName):\($0.conversationMatchStatus.rawValue)" }
+            .joined()
+
+        if isInitialPoll || oldFP != newFP {
+            rebuildViews()
+        }
+
+        if previousRemoteDestinations != remoteDestinations || oldRemoteFP != newRemoteFP {
+            bumpRemoteBurstWindow()
+        }
+
+        if previousRemoteDestinations != remoteDestinations,
+           !remoteDestinations.isEmpty {
+            requestRemoteRefresh(policy: .forceRefresh)
+        } else if !hadRemoteState,
+                  newSessions.contains(where: \.isRemote) {
+            bumpRemoteBurstWindow()
+        }
+
+        refreshPollTimer()
+        refreshRemotePollTimer()
+        refreshAnimationTimer()
+    }
+
+    private func bumpRemoteBurstWindow() {
+        guard !knownRemoteDestinations.isEmpty else { return }
+        remoteBurstUntil = Date().addingTimeInterval(remoteBurstDuration)
+        refreshRemotePollTimer()
+    }
+
+    func noteRemoteInteraction() {
+        bumpRemoteBurstWindow()
+        requestRemoteRefresh(policy: .forceRefresh)
     }
 
     private func playAttentionSoundIfNeeded(
