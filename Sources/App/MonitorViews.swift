@@ -9,17 +9,17 @@ func safeMonospacedFont(ofSize size: CGFloat, weight: NSFont.Weight) -> NSFont {
 
 // MARK: - Session View
 
-class ClaudeSessionView: NSView {
-    let session: ClaudeSession
+class MonitorSessionView: NSView {
+    let session: MonitorSession
     var animFrame: Int = 0
     var sprites: SpriteCache!
     private var trackingArea: NSTrackingArea?
     private var hovered = false
-    var onClick: ((ClaudeSession) -> Void)?
+    var onClick: ((MonitorSession) -> Void)?
     var needsAnimation: Bool { session.shouldAnimate }
     private var lastAnimationSignature: Int?
 
-    init(session: ClaudeSession, frame: NSRect, sprites: SpriteCache) {
+    init(session: MonitorSession, frame: NSRect, sprites: SpriteCache) {
         self.session = session
         self.sprites = sprites
         super.init(frame: frame)
@@ -58,7 +58,7 @@ class ClaudeSessionView: NSView {
         switch session.state {
         case .working:
             spriteFrameIndex = frame % spriteFrames
-            dots = session.tool == .terminal ? 0 : (frame % 3) + 1
+            dots = session.tool.showsActivityDots ? (frame % 3) + 1 : 0
         case .done:
             spriteFrameIndex = (frame / 4) % spriteFrames
             dots = 0
@@ -83,9 +83,7 @@ class ClaudeSessionView: NSView {
         let spriteTopInset: CGFloat = 4
         let frames = sprites.frames(for: session.tool, state: session.state)
         let img: NSImage
-        if session.tool == .terminal {
-            img = frames[0]
-        } else {
+        if session.shouldAnimate {
             switch session.state {
             case .working:
                 img = frames[animFrame % frames.count]
@@ -94,6 +92,8 @@ class ClaudeSessionView: NSView {
             case .idle:
                 img = frames[(animFrame / 6) % frames.count]
             }
+        } else {
+            img = frames[0]
         }
 
         let x = tileBounds.minX + (tileBounds.width - img.size.width) / 2
@@ -106,7 +106,7 @@ class ClaudeSessionView: NSView {
         // Name label with tool badge
         let name = session.displayLabelText
         let color: NSColor
-        if session.tool == .terminal {
+        if session.tool.isTerminal {
             switch session.state {
             case .working:
                 color = NSColor(red: 0.48, green: 0.76, blue: 1.0, alpha: 1.0)
@@ -141,7 +141,7 @@ class ClaudeSessionView: NSView {
         }
 
         // Activity dots for working
-        if session.state == .working && session.tool != .terminal {
+        if session.state == .working && session.tool.showsActivityDots {
             let dots = (animFrame % 3) + 1
             NSColor(red: 0.4, green: 0.9, blue: 0.5, alpha: 0.9).setFill()
             let totalW = CGFloat(dots) * 4 + CGFloat(dots - 1) * 3

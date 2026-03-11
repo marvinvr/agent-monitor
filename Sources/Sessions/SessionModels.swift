@@ -7,6 +7,30 @@ enum SessionTool: String {
     case codex
     case terminal
 
+    var displayName: String {
+        switch self {
+        case .claude:
+            return "Claude"
+        case .codex:
+            return "Codex"
+        case .terminal:
+            return "Terminal"
+        }
+    }
+
+    var badge: String {
+        switch self {
+        case .claude:
+            return "C"
+        case .codex:
+            return "X"
+        case .terminal:
+            return "T"
+        }
+    }
+
+    var isTerminal: Bool { self == .terminal }
+
     var sortRank: Int {
         switch self {
         case .claude:
@@ -26,6 +50,28 @@ enum SessionTool: String {
             return false
         }
     }
+
+    var showsActivityDots: Bool { !isTerminal }
+
+    func stateDescription(for state: SessionState) -> String {
+        if isTerminal {
+            switch state {
+            case .idle, .done:
+                return "Idle"
+            case .working:
+                return "Active"
+            }
+        }
+
+        switch state {
+        case .idle:
+            return "Idle"
+        case .working:
+            return "Working"
+        case .done:
+            return "Done!"
+        }
+    }
 }
 
 enum SessionHostApp: String {
@@ -33,21 +79,11 @@ enum SessionHostApp: String {
     case solo
 
     var displayName: String {
-        switch self {
-        case .ghostty:
-            return "Ghostty"
-        case .solo:
-            return "Solo"
-        }
+        HostRegistry.adapter(for: self)?.displayName ?? rawValue.capitalized
     }
 
     var bundleIdentifier: String {
-        switch self {
-        case .ghostty:
-            return "com.mitchellh.ghostty"
-        case .solo:
-            return "com.soloterm.solo"
-        }
+        HostRegistry.adapter(for: self)?.bundleIdentifier ?? ""
     }
 }
 
@@ -79,9 +115,9 @@ enum ConversationMatchStatus: String {
     }
 }
 
-// MARK: - Claude Session
+// MARK: - Monitor Session
 
-struct ClaudeSession: Hashable {
+struct MonitorSession: Hashable {
     static let remoteTerminalSubtitlePlaceholder = "remote"
     private static let truncatedSuffix = ".."
 
@@ -140,7 +176,7 @@ struct ClaudeSession: Hashable {
     var displayName: String {
         guard isInteractive else { return "sub" }
         if let title = conversationTitle, !title.isEmpty { return title }
-        return ClaudeNamer.name(for: namingKey)
+        return SessionNamer.name(for: namingKey)
     }
 
     var displayLabelText: String {
@@ -148,17 +184,11 @@ struct ClaudeSession: Hashable {
         return Self.truncatedLabel(name)
     }
 
-    var toolBadge: String {
-        switch tool {
-        case .claude: return "C"
-        case .codex: return "X"
-        case .terminal: return "T"
-        }
-    }
+    var toolBadge: String { tool.badge }
 
     private func contextLabelMatchesDisplayName(_ label: String) -> Bool {
         if label == displayName { return true }
-        guard tool == .terminal else { return false }
+        guard tool.isTerminal else { return false }
         return displayName.hasPrefix(label + " #")
     }
 
@@ -172,30 +202,17 @@ struct ClaudeSession: Hashable {
                 return Self.truncatedLabel(remoteHost)
             }
         }
-        if tool == .terminal {
+        if tool.isTerminal {
             return isRemote ? Self.remoteTerminalSubtitlePlaceholder : "-"
         }
         return nil
     }
 
     var tooltipText: String {
-        let stateStr: String
-        if tool == .terminal {
-            switch state {
-            case .idle: stateStr = "Idle"
-            case .working: stateStr = "Active"
-            case .done: stateStr = "Idle"
-            }
-        } else {
-            switch state {
-            case .idle: stateStr = "Idle"
-            case .working: stateStr = "Working"
-            case .done: stateStr = "Done!"
-            }
-        }
+        let stateStr = tool.stateDescription(for: state)
         let cpu = String(format: "%.1f%%", smoothedCpu)
         let name = displayName
-        let toolName = tool.rawValue.capitalized
+        let toolName = tool.displayName
         let folder = folderName.flatMap { contextLabelMatchesDisplayName($0) ? nil : " in \($0)" } ?? ""
         let convo = conversationId.map { "\nSession: \($0)" } ?? ""
         let remote: String
@@ -221,7 +238,7 @@ struct ClaudeSession: Hashable {
     }
 
     func hash(into hasher: inout Hasher) { hasher.combine(pid) }
-    static func == (lhs: ClaudeSession, rhs: ClaudeSession) -> Bool { lhs.pid == rhs.pid }
+    static func == (lhs: MonitorSession, rhs: MonitorSession) -> Bool { lhs.pid == rhs.pid }
 
     private static func truncatedLabel(_ text: String, maxVisible: Int = 10) -> String {
         guard text.count > maxVisible else { return text }
@@ -237,9 +254,9 @@ struct ClaudeSession: Hashable {
     }
 }
 
-// MARK: - Claude Names (persistent, hashed, short)
+// MARK: - Session Names (persistent, hashed, short)
 
-enum ClaudeNamer {
+enum SessionNamer {
     private static let names = [
         "acorn", "basil", "cinder", "duney", "ember", "fable", "grove", "helix",
         "ivory", "julep", "kestl", "lumen", "mirth", "noble", "orbit", "pacer",

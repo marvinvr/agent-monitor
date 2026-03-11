@@ -1,15 +1,15 @@
 # Agent Monitor
 
-macOS floating window that shows your active Claude Code and Codex CLI sessions as pixel art sprites.
+macOS floating window that shows your active Claude Code, Codex CLI, and terminal sessions as pixel art sprites.
 
 ![macOS](https://img.shields.io/badge/macOS-13%2B-blue)
 
 ## What it does
 
-- Polls running processes to find interactive `claude` and `codex` sessions
+- Polls running processes to find interactive `claude`, `codex`, and host-backed terminal sessions
 - Shows each session as an animated pixel art sprite in a floating always-on-top panel
 - Three states: **idle**, **working**, **done**
-- Click a session to jump to the matching Ghostty tab or window
+- Click a session to jump to the matching Ghostty or Solo target
 - Works with local sessions and basic remote/SSH sessions
 - Lives in the menu bar and runs without a dock icon
 
@@ -32,7 +32,7 @@ cp Info.plist "/Applications/Agent Monitor.app/Contents/Info.plist"
 ## Requirements
 
 - macOS 13+
-- Accessibility permission (for Ghostty tab switching via keystrokes)
+- Accessibility permission (for Ghostty/Solo session switching)
 
 ## Session Names
 

@@ -1,8 +1,8 @@
 import Foundation
 
 extension SessionDetector {
-func localAgentSessions(from processes: [ProcessSnapshot], byParent: [Int32: [ProcessSnapshot]]) -> [ClaudeSession] {
-    var sessions: [ClaudeSession] = []
+func localAgentSessions(from processes: [ProcessSnapshot], byParent: [Int32: [ProcessSnapshot]]) -> [MonitorSession] {
+    var sessions: [MonitorSession] = []
     var seen = Set<Int32>()
     var activeClaudeCountByCwd: [String: Int] = [:]
     let byPid = Dictionary(uniqueKeysWithValues: processes.map { ($0.pid, $0) })
@@ -73,7 +73,7 @@ func localAgentSessions(from processes: [ProcessSnapshot], byParent: [Int32: [Pr
             title = nil
         }
 
-        sessions.append(ClaudeSession(
+        sessions.append(MonitorSession(
             pid: pid,
             tty: process.tty,
             tool: tool,
@@ -95,13 +95,13 @@ func localAgentSessions(from processes: [ProcessSnapshot], byParent: [Int32: [Pr
     return sessions
 }
 
-func remoteAgentSessions(from localProcesses: [ProcessSnapshot]) -> [ClaudeSession] {
+func remoteAgentSessions(from localProcesses: [ProcessSnapshot]) -> [MonitorSession] {
     let proxies = remoteSSHProxySessions(from: localProcesses)
     guard !proxies.isEmpty else { return [] }
     let localByPid = Dictionary(uniqueKeysWithValues: localProcesses.map { ($0.pid, $0) })
 
     let grouped = Dictionary(grouping: proxies, by: { $0.destination })
-    var sessions: [ClaudeSession] = []
+    var sessions: [MonitorSession] = []
 
     for (destination, group) in grouped {
         guard let snapshot = remoteSnapshot(for: destination) else { continue }
@@ -120,7 +120,7 @@ func ghosttyTerminalSessions(
     from processes: [ProcessSnapshot],
     byParent: [Int32: [ProcessSnapshot]],
     excludingTTYs: Set<String>
-) -> [ClaudeSession] {
+) -> [MonitorSession] {
     let loginTTYs = ghosttyLoginTTYs(from: processes)
     guard !loginTTYs.isEmpty else { return [] }
     let processesByTTY = Dictionary(grouping: processes, by: \.tty)
@@ -175,7 +175,7 @@ func ghosttyTerminalSessions(
         counts[title, default: 0] += 1
     }
     var titleOrdinals: [String: Int] = [:]
-    var sessions: [ClaudeSession] = []
+    var sessions: [MonitorSession] = []
 
     for draft in drafts {
         let title: String?
@@ -191,11 +191,15 @@ func ghosttyTerminalSessions(
             title = nil
         }
 
-        let pid = syntheticTerminalPid(tty: draft.tty, remoteHost: draft.sshDestination?.displayName)
+        let pid = syntheticTerminalPid(
+            tty: draft.tty,
+            remoteHost: draft.sshDestination?.displayName,
+            hostApp: .ghostty
+        )
         let smoothed = smoothedCPU(for: pid, cpu: draft.rawCpu)
         let state = cpuDrivenState(for: pid, tool: .terminal, rawCpu: draft.rawCpu, smoothedCpu: smoothed)
 
-        sessions.append(ClaudeSession(
+        sessions.append(MonitorSession(
             pid: pid,
             tty: draft.tty,
             tool: .terminal,
@@ -222,13 +226,13 @@ func synthesizeRemoteSessions(
     destination: SSHDestination,
     snapshot: RemoteHostSnapshot,
     localByPid: [Int32: ProcessSnapshot]
-) -> [ClaudeSession] {
+) -> [MonitorSession] {
     let sortedProxies = proxies.sorted { $0.pid < $1.pid }
     let orderedTTYs = remoteTTYOrder(from: snapshot.processes)
     guard !sortedProxies.isEmpty, !orderedTTYs.isEmpty else { return [] }
     let processesByTTY = Dictionary(grouping: snapshot.processes, by: \.tty)
 
-    var sessions: [ClaudeSession] = []
+    var sessions: [MonitorSession] = []
     // We cannot identify the exact existing remote PTY for a given local ssh client
     // without cooperation from that shell, so we pair by connection creation order.
     for (proxy, remoteTTY) in zip(sortedProxies, orderedTTYs) {
@@ -250,7 +254,7 @@ func synthesizeRemoteSessions(
             let smoothed = smoothedCPU(for: syntheticPid, cpu: rawCpu)
             let state = cpuDrivenState(for: syntheticPid, tool: tool, rawCpu: rawCpu, smoothedCpu: smoothed)
 
-            sessions.append(ClaudeSession(
+            sessions.append(MonitorSession(
                 pid: syntheticPid,
                 tty: proxy.tty,
                 tool: tool,
@@ -280,14 +284,10 @@ func owningHostApp(forPid pid: Int32, byPid: [Int32: ProcessSnapshot]) -> Sessio
     while let pidToCheck = currentPid,
           visited.insert(pidToCheck).inserted,
           let process = byPid[pidToCheck] {
-        switch process.binaryName.lowercased() {
-        case "ghostty":
-            return .ghostty
-        case "solo":
-            return .solo
-        default:
-            currentPid = process.ppid > 0 ? process.ppid : nil
+        if let hostApp = HostRegistry.owningHostApp(for: process) {
+            return hostApp
         }
+        currentPid = process.ppid > 0 ? process.ppid : nil
     }
 
     return nil
@@ -657,8 +657,8 @@ func syntheticRemotePid(localSSH: Int32, remotePid: Int32, tool: SessionTool) ->
     return -(folded == 0 ? 1 : folded)
 }
 
-func syntheticTerminalPid(tty: String, remoteHost: String?) -> Int32 {
-    let raw = "terminal:\(tty):\(remoteHost ?? "local")"
+func syntheticTerminalPid(tty: String, remoteHost: String?, hostApp: SessionHostApp) -> Int32 {
+    let raw = "terminal:\(hostApp.rawValue):\(tty):\(remoteHost ?? "local")"
     var hash: UInt32 = 2166136261
     for byte in raw.utf8 {
         hash ^= UInt32(byte)

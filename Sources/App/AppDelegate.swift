@@ -8,8 +8,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     var panel: MonitorPanel!
     var detector = SessionDetector()
-    var sessions: [ClaudeSession] = []
-    var views: [ClaudeSessionView] = []
+    var sessions: [MonitorSession] = []
+    var views: [MonitorSessionView] = []
     var frame: Int = 0
     var content: MonitorContentView!
     var titleLabel: NSTextField!
@@ -26,6 +26,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var pollTimer: Timer?
     private var animationTimer: Timer?
     private var animationFrameStep = 1
+    var soloShortcutTargetCacheByPid: [Int32: AppDelegate.SoloShortcutTarget] = [:]
+    var soloProcessNameCacheByPid: [Int32: String] = [:]
+    var soloSessionCacheFingerprint: String?
     private let stayAliveReason = "Agent Monitor should remain running in the background"
     private let cellW: CGFloat = 86
     private let cellH: CGFloat = 104
@@ -220,6 +223,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 self.hasCompletedInitialPoll = true
                 self.playAttentionSoundIfNeeded(oldSessions: oldSessions, newSessions: newSessions, isInitialPoll: isInitialPoll)
                 self.sessions = newSessions
+                self.pruneHostLookupCaches(alivePids: Set(newSessions.map(\.pid)))
+                HostRegistry.refreshCaches(for: newSessions, appDelegate: self)
                 if isInitialPoll || oldFP != newFP { self.rebuildViews() }
                 self.refreshPollTimer()
                 self.refreshAnimationTimer()
@@ -234,8 +239,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func playAttentionSoundIfNeeded(
-        oldSessions: [ClaudeSession],
-        newSessions: [ClaudeSession],
+        oldSessions: [MonitorSession],
+        newSessions: [MonitorSession],
         isInitialPoll: Bool
     ) {
         guard !isInitialPoll else { return }
@@ -288,7 +293,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         } else {
             let tools = Set(sessions.map { $0.tool })
             if tools.count == 1, let only = tools.first {
-                titleLabel.stringValue = count <= 1 ? only.rawValue.capitalized : "\(only.rawValue.capitalized) Monitor"
+                titleLabel.stringValue = count <= 1 ? only.displayName : "\(only.displayName) Monitor"
             } else {
                 titleLabel.stringValue = count <= 1 ? "Agents" : "Agent Monitor"
             }
@@ -326,7 +331,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             let x = pad + CGFloat(col) * cellW
             let y = yOff - CGFloat(row + 1) * cellH
 
-            let v = ClaudeSessionView(session: s, frame: NSRect(x: x, y: y, width: cellW, height: cellH), sprites: sprites)
+            let v = MonitorSessionView(session: s, frame: NSRect(x: x, y: y, width: cellW, height: cellH), sprites: sprites)
             v.onClick = { [weak self] s in self?.jumpTo(s) }
             content.addSubview(v)
             views.append(v)
@@ -339,5 +344,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
         loadingView?.animFrame = frame
         loadingView?.needsDisplay = true
+    }
+
+    private func pruneHostLookupCaches(alivePids: Set<Int32>) {
+        soloShortcutTargetCacheByPid = soloShortcutTargetCacheByPid.filter { alivePids.contains($0.key) }
+        soloProcessNameCacheByPid = soloProcessNameCacheByPid.filter { alivePids.contains($0.key) }
     }
 }

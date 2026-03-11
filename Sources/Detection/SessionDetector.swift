@@ -6,7 +6,7 @@ class SessionDetector {
     private let providers: [any SessionProvider] = [
         LocalAgentSessionProvider(),
         RemoteAgentSessionProvider(),
-        GhosttyTerminalSessionProvider(),
+        HostTerminalSessionProvider(),
     ]
 
     struct ProcessSnapshot {
@@ -99,12 +99,12 @@ class SessionDetector {
     let claudeProjectEntriesCacheTTL: TimeInterval = 15
     let agentStartupIdleGrace = 4
 
-    func detectSessions() -> [ClaudeSession] {
+    func detectSessions() -> [MonitorSession] {
         guard let snapshot = makeSnapshot() else {
             return []
         }
 
-        var sessions: [ClaudeSession] = []
+        var sessions: [MonitorSession] = []
         for provider in providers {
             sessions.append(contentsOf: provider.detect(
                 in: snapshot,
@@ -134,7 +134,7 @@ class SessionDetector {
             }
             return session.tty
         })
-        ClaudeNamer.prune(activeKeys: activeNamingKeys)
+        SessionNamer.prune(activeKeys: activeNamingKeys)
 
         sessions.sort { lhs, rhs in
             if lhs.directorySortKey != rhs.directorySortKey {
@@ -165,15 +165,15 @@ class SessionDetector {
         )
     }
 
-    func detectLocalAgentSessions(in snapshot: SystemSnapshot) -> [ClaudeSession] {
+    func detectLocalAgentSessions(in snapshot: SystemSnapshot) -> [MonitorSession] {
         localAgentSessions(from: snapshot.processes, byParent: snapshot.byParent)
     }
 
-    func detectRemoteAgentSessions(in snapshot: SystemSnapshot) -> [ClaudeSession] {
+    func detectRemoteAgentSessions(in snapshot: SystemSnapshot) -> [MonitorSession] {
         remoteAgentSessions(from: snapshot.processes)
     }
 
-    func detectGhosttyTerminalSessions(in snapshot: SystemSnapshot, existingSessions: [ClaudeSession]) -> [ClaudeSession] {
+    func detectGhosttyTerminalSessions(in snapshot: SystemSnapshot, existingSessions: [MonitorSession]) -> [MonitorSession] {
         ghosttyTerminalSessions(
             from: snapshot.processes,
             byParent: snapshot.byParent,
