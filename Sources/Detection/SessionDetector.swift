@@ -94,6 +94,7 @@ class SessionDetector {
     var claudeIndexCacheByProjectPath: [String: [ClaudeIndexEntry]] = [:]
     var claudeIndexMtimeByProjectPath: [String: Date] = [:]
     var claudeProjectEntriesCacheByRoot: [String: CachedValue<[ClaudeIndexEntry]>] = [:]
+    var claudeAssignmentCacheByProjectPath: [String: CachedValue<[Int32: String]>] = [:]
     var transcriptActivityCacheByPath: [String: CachedTranscriptActivity] = [:]
     var cwdPathCacheByPid: [Int32: CachedPathLookup] = [:]
     var processStartDateCacheByPid: [Int32: CachedValue<Date>] = [:]
@@ -108,6 +109,7 @@ class SessionDetector {
     let claudeExactSessionLookupTTL: TimeInterval = 6
     let claudeHistoryLookupTTL: TimeInterval = 12
     let claudeProjectEntriesCacheTTL: TimeInterval = 15
+    let claudeAssignmentCacheTTL: TimeInterval = 2
     let agentStartupIdleGrace = 4
 
     func detectSessions(

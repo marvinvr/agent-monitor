@@ -87,6 +87,10 @@ extension AppDelegate {
             ))
         }
 
+        if positioned.allSatisfy({ $0.number == nil }) {
+            return positioned.map(\.element)
+        }
+
         positioned.sort { lhs, rhs in
             switch (lhs.number, rhs.number) {
             case let (l?, r?): return l < r

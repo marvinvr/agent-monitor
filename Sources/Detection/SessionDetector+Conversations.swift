@@ -1,5 +1,27 @@
 import Foundation
 
+fileprivate struct ClaudeProjectSessionCandidate {
+    let sessionId: String
+    let path: String?
+    let modified: Date
+    let historyTimestamps: [Date]
+
+    var hasTranscript: Bool { path != nil }
+    var hasHistory: Bool { !historyTimestamps.isEmpty }
+
+    func sortAnchor(relativeTo start: Date?) -> Date {
+        guard let start else { return historyTimestamps.first ?? modified }
+        let threshold = start.addingTimeInterval(-30)
+        return historyTimestamps.first(where: { $0 >= threshold }) ?? historyTimestamps.last ?? modified
+    }
+
+    func effectiveAnchor(for processStart: Date?) -> Date {
+        guard let processStart else { return historyTimestamps.first ?? modified }
+        let threshold = processStart.addingTimeInterval(-10)
+        return historyTimestamps.first(where: { $0 >= threshold }) ?? historyTimestamps.last ?? modified
+    }
+}
+
 extension SessionDetector {
 func transcriptState(for tool: SessionTool, conversation: ConversationMeta) -> SessionState? {
     guard conversation.matchStatus == .verified,
@@ -54,6 +76,16 @@ func claudeConversationMeta(
     cwdPath: String?,
     hasUniqueClaudeCwd: Bool
 ) -> ConversationMeta {
+    if let cwdPath,
+       let assignedSessionId = cachedClaudeAssignedSessionId(forPid: pid, cwdPath: cwdPath) {
+        return claudeConversationMeta(
+            forSessionId: assignedSessionId,
+            pid: pid,
+            cwdPath: cwdPath,
+            matchStatus: .verified
+        )
+    }
+
     let cachedSessionId = claudeSessionIdByPid[pid]
     let cachedVerifiedSessionId = cachedSessionId.flatMap {
         claudeMetaBySessionId[$0]?.matchStatus == .verified ? $0 : nil
@@ -80,31 +112,264 @@ func claudeConversationMeta(
     guard let sid = exactSessionId ?? fallbackSessionId else {
         return ConversationMeta(id: nil, firstPrompt: nil, matchStatus: .unmatched, transcriptPath: nil)
     }
-    claudeSessionIdByPid[pid] = sid
-    if let cached = claudeMetaBySessionId[sid] {
+    return claudeConversationMeta(
+        forSessionId: sid,
+        pid: pid,
+        cwdPath: cwdPath,
+        matchStatus: matchStatus
+    )
+}
+
+func claudeConversationMeta(
+    forSessionId sessionId: String,
+    pid: Int32,
+    cwdPath: String?,
+    matchStatus: ConversationMatchStatus
+) -> ConversationMeta {
+    claudeSessionIdByPid[pid] = sessionId
+    if let cached = claudeMetaBySessionId[sessionId] {
         let merged = ConversationMeta(
             id: cached.id,
             firstPrompt: cached.firstPrompt,
             matchStatus: cached.matchStatus.merged(with: matchStatus),
             transcriptPath: cached.transcriptPath
         )
-        claudeMetaBySessionId[sid] = merged
+        claudeMetaBySessionId[sessionId] = merged
         return merged
     }
-    guard let sessionPath = claudeSessionPath(forSessionId: sid, cwdPath: cwdPath) else {
-        let indexPrompt = claudeIndexEntry(forSessionId: sid, cwdPath: cwdPath)?.firstPrompt
+
+    guard let sessionPath = claudeSessionPath(forSessionId: sessionId, cwdPath: cwdPath) else {
+        let indexPrompt = claudeIndexEntry(forSessionId: sessionId, cwdPath: cwdPath)?.firstPrompt
         let empty = ConversationMeta(
-            id: sid,
+            id: sessionId,
             firstPrompt: Self.cleanPrompt(indexPrompt),
             matchStatus: matchStatus,
             transcriptPath: nil
         )
-        claudeMetaBySessionId[sid] = empty
+        claudeMetaBySessionId[sessionId] = empty
         return empty
     }
-    let parsed = parseClaudeSessionMeta(path: sessionPath, sessionId: sid, matchStatus: matchStatus)
-    claudeMetaBySessionId[sid] = parsed
+
+    let parsed = parseClaudeSessionMeta(path: sessionPath, sessionId: sessionId, matchStatus: matchStatus)
+    claudeMetaBySessionId[sessionId] = parsed
     return parsed
+}
+
+func cachedClaudeAssignedSessionId(forPid pid: Int32, cwdPath: String) -> String? {
+    let now = Date()
+    if let cached = claudeAssignmentCacheByProjectPath[cwdPath],
+       now.timeIntervalSince(cached.fetchedAt) < claudeAssignmentCacheTTL {
+        return cached.value?[pid]
+    }
+
+    let assignments = claudeSessionAssignments(forCwd: cwdPath)
+    claudeAssignmentCacheByProjectPath[cwdPath] = CachedValue(
+        fetchedAt: now,
+        value: assignments.isEmpty ? nil : assignments
+    )
+    return assignments[pid]
+}
+
+func claudeSessionAssignments(forCwd cwdPath: String) -> [Int32: String] {
+    let activePids = activeClaudePids(forCwd: cwdPath)
+    guard !activePids.isEmpty else { return [:] }
+
+    let pidStarts = Dictionary(uniqueKeysWithValues: activePids.map { ($0, processStartDate(forPid: $0)) })
+    let sortedPids = activePids.sorted { lhs, rhs in
+        let lhsStart = pidStarts[lhs] ?? nil
+        let rhsStart = pidStarts[rhs] ?? nil
+        switch (lhsStart, rhsStart) {
+        case let (l?, r?):
+            if l != r { return l < r }
+        case (nil, .some):
+            return false
+        case (.some, nil):
+            return true
+        case (nil, nil):
+            break
+        }
+        return lhs < rhs
+    }
+    let sortedPidStarts = sortedPids.compactMap { pidStarts[$0] ?? nil }
+
+    let candidates = claudeAssignmentCandidates(
+        forCwd: cwdPath,
+        activePidStarts: sortedPidStarts
+    )
+    guard !candidates.isEmpty else { return [:] }
+
+    let sortedCandidates = candidates.sorted { lhs, rhs in
+        let lhsAnchor = lhs.sortAnchor(relativeTo: sortedPidStarts.first)
+        let rhsAnchor = rhs.sortAnchor(relativeTo: sortedPidStarts.first)
+        if lhsAnchor != rhsAnchor { return lhsAnchor < rhsAnchor }
+        if lhs.modified != rhs.modified { return lhs.modified < rhs.modified }
+        return lhs.sessionId < rhs.sessionId
+    }
+
+    let pidList = sortedPids
+    let candidateList = sortedCandidates
+    let pidCount = pidList.count
+    let candidateCount = candidateList.count
+    guard candidateCount >= pidCount else {
+        return Dictionary(uniqueKeysWithValues: zip(pidList, candidateList).map { ($0.0, $0.1.sessionId) })
+    }
+
+    var memo: [String: Int] = [:]
+    func assignmentCost(pid: Int32, candidate: ClaudeProjectSessionCandidate) -> Int {
+        let processStart = pidStarts[pid] ?? nil
+        let anchor = candidate.effectiveAnchor(for: processStart)
+        let cachedSessionId = claudeSessionIdByPid[pid]
+        var cost = 0
+
+        if let processStart {
+            let delta = anchor.timeIntervalSince(processStart)
+            if delta < -10 {
+                cost += 1000 + Int(abs(delta) * 10)
+            } else if delta < 0 {
+                cost += Int(abs(delta) * 3)
+            } else {
+                cost += Int(delta)
+            }
+        }
+
+        if !candidate.hasTranscript {
+            cost += 50_000
+        }
+        if candidate.hasHistory {
+            cost -= 80
+        }
+        if cachedSessionId == candidate.sessionId {
+            cost -= 120
+        }
+        return cost
+    }
+
+    func bestCost(pidIndex: Int, candidateIndex: Int) -> Int {
+        if pidIndex == pidCount { return 0 }
+        if candidateIndex == candidateCount { return 1_000_000 }
+        if candidateCount - candidateIndex < pidCount - pidIndex { return 1_000_000 }
+
+        let key = "\(pidIndex):\(candidateIndex)"
+        if let cached = memo[key] { return cached }
+
+        let skip = bestCost(pidIndex: pidIndex, candidateIndex: candidateIndex + 1)
+        let take = assignmentCost(pid: pidList[pidIndex], candidate: candidateList[candidateIndex])
+            + bestCost(pidIndex: pidIndex + 1, candidateIndex: candidateIndex + 1)
+        let resolved = min(skip, take)
+        memo[key] = resolved
+        return resolved
+    }
+
+    var assignments: [Int32: String] = [:]
+    var pidIndex = 0
+    var candidateIndex = 0
+    while pidIndex < pidCount, candidateIndex < candidateCount {
+        let skip = bestCost(pidIndex: pidIndex, candidateIndex: candidateIndex + 1)
+        let take = assignmentCost(pid: pidList[pidIndex], candidate: candidateList[candidateIndex])
+            + bestCost(pidIndex: pidIndex + 1, candidateIndex: candidateIndex + 1)
+        if take <= skip {
+            assignments[pidList[pidIndex]] = candidateList[candidateIndex].sessionId
+            pidIndex += 1
+        }
+        candidateIndex += 1
+    }
+
+    return assignments
+}
+
+func activeClaudePids(forCwd cwdPath: String) -> [Int32] {
+    guard let output = runProcess(path: "/bin/ps", arguments: ["-eo", "pid,ppid,tty,etime,%cpu,command"]) else {
+        return []
+    }
+
+    let processes = parseProcessSnapshots(from: output)
+    return processes.compactMap { process in
+        guard tool(for: process) == .claude,
+              isInteractiveTTY(process.tty)
+        else {
+            return nil
+        }
+
+        let isPiped = process.command.contains(" -p ") || process.command.contains(" --print")
+        guard !isPiped,
+              cachedCwdPath(forPid: process.pid) == cwdPath
+        else {
+            return nil
+        }
+
+        return process.pid
+    }
+}
+
+fileprivate func claudeAssignmentCandidates(
+    forCwd cwdPath: String,
+    activePidStarts: [Date]
+) -> [ClaudeProjectSessionCandidate] {
+    let historyBySessionId = claudeHistoryTimestampsBySessionId(forCwd: cwdPath)
+    let recentEntries = Array(claudeIndexEntries(forCwd: cwdPath).prefix(max(18, activePidStarts.count * 6)))
+    let retainedSessionIds = Set(claudeSessionIdByPid.values)
+
+    var sessionIds = Set(recentEntries.map(\.sessionId))
+    sessionIds.formUnion(historyBySessionId.keys)
+    guard !sessionIds.isEmpty else { return [] }
+
+    let earliestStart = activePidStarts.min()
+    let transcriptFreshnessFloor = earliestStart?.addingTimeInterval(-3600)
+
+    let recentEntriesBySessionId = Dictionary(uniqueKeysWithValues: recentEntries.map { ($0.sessionId, $0) })
+    let candidates = sessionIds.compactMap { sessionId -> ClaudeProjectSessionCandidate? in
+        let entry = recentEntriesBySessionId[sessionId]
+        let path = claudeSessionPath(forSessionId: sessionId, cwdPath: cwdPath)
+        let modified = path.flatMap { Self.fileModificationDate(path: $0) }
+            ?? entry?.modified
+            ?? historyBySessionId[sessionId]?.last
+        guard let modified else { return nil }
+
+        let timestamps = historyBySessionId[sessionId] ?? []
+        if let transcriptFreshnessFloor,
+           timestamps.isEmpty,
+           modified < transcriptFreshnessFloor,
+           !retainedSessionIds.contains(sessionId) {
+            return nil
+        }
+
+        return ClaudeProjectSessionCandidate(
+            sessionId: sessionId,
+            path: path,
+            modified: modified,
+            historyTimestamps: timestamps
+        )
+    }
+
+    return candidates
+}
+
+func claudeHistoryTimestampsBySessionId(forCwd cwdPath: String) -> [String: [Date]] {
+    let historyPath = (NSHomeDirectory() as NSString).appendingPathComponent(".claude/history.jsonl")
+    guard let lines = Self.readTailLines(path: historyPath, maxBytes: 1_000_000) else {
+        return [:]
+    }
+
+    var timestampsBySessionId: [String: [Date]] = [:]
+    for line in lines {
+        guard let data = line.data(using: String.Encoding.utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let project = object["project"] as? String,
+              project == cwdPath,
+              let sessionId = object["sessionId"] as? String,
+              let timestampMs = object["timestamp"] as? NSNumber
+        else {
+            continue
+        }
+
+        let timestamp = Date(timeIntervalSince1970: timestampMs.doubleValue / 1000)
+        timestampsBySessionId[sessionId, default: []].append(timestamp)
+    }
+
+    for sessionId in timestampsBySessionId.keys {
+        timestampsBySessionId[sessionId]?.sort()
+    }
+    return timestampsBySessionId
 }
 
 func cachedClaudeSessionId(forPid pid: Int32) -> String? {
